@@ -1,4 +1,5 @@
-# Belebele
+# Tiny Belebele
+This is a lighter version of the Belebele dataset, where each (subset, split) pair includes a randomly selected 10% of the original data. To maintain sufficient sample sizes, if this 10% subset contains fewer than 100 examples, it is expanded to include at least 100 samples. In cases where the total number of available samples is less than 100, all samples are retained.
 
 ### Paper
 
@@ -26,13 +27,13 @@ Homepage: https://github.com/facebookresearch/belebele
 
 #### Groups
 
-- `belebele`: All 122 languages of the Belebele dataset, evaluated following the methodology in MMLU's original implementation.
+- `tiny_belebele`: All 122 languages of the Belebele dataset, evaluated following the methodology in MMLU's original implementation.
 
 #### Tasks
 
 
 The following tasks evaluate languages in the Belebele dataset using loglikelihood-based multiple-choice scoring:
-- `belebele_{language}`
+- `tiny_belebele_{language}`
 
 The variant evaluated here is the 0-shot or few-shot evaluation with English Instructions.
 

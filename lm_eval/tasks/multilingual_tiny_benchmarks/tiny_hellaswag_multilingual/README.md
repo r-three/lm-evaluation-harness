@@ -1,4 +1,5 @@
-# Multilingual HellaSwag
+# Tiny Multilingual HellaSwag
+This is a lighter version of the Multilingual HellaSwag dataset, where each (subset, split) pair includes a randomly selected 10% of the original data. To maintain sufficient sample sizes, if this 10% subset contains fewer than 100 examples, it is expanded to include at least 100 samples. In cases where the total number of available samples is less than 100, all samples are retained. 
 
 ### Paper
 
@@ -27,11 +28,11 @@ Homepage: `https://github.com/nlp-uoregon/Okapi`
 
 #### Groups
 
-- hellaswag_multilingual
+- tiny_hellaswag_multilingual
 
 #### Tasks
 
-- `hellaswag_{ar,bn,ca,da,de,es,eu,fr,gu,hi,hr,hu,hy,id,it,kn,ml,mr,ne,nl,pt,ro,ru,sk,sr,sv,ta,te,uk,vi}`
+- `tiny_hellaswag_{ar,bn,ca,da,de,es,eu,fr,gu,hi,hr,hu,hy,id,it,kn,ml,mr,ne,nl,pt,ro,ru,sk,sr,sv,ta,te,uk,vi}`
 
 
 ### Checklist
