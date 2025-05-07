@@ -1,0 +1,6 @@
+include: _tiny_hellaswag_yaml
+task: tiny_hellaswag_vi
+dataset_path: r-three/tiny-m-hellaswag
+dataset_name: vi
+training_split: null
+validation_split: val
