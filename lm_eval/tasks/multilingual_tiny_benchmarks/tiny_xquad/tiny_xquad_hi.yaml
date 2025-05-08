@@ -1,0 +1,4 @@
+include: tiny_xquad_common_yaml
+task: tiny_xquad_hi
+dataset_name: tiny_xquad.hi
+doc_to_text: "प्रसंग: {{context}}\n\nसवाल: {{question}}\n\nउत्तर:"

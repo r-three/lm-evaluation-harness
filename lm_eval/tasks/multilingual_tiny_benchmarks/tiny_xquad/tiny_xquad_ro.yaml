@@ -1,0 +1,4 @@
+include: tiny_xquad_common_yaml
+task: tiny_xquad_ro
+dataset_name: tiny_xquad.ro
+doc_to_text: "Context: {{context}}\n\nÎntrebare: {{question}}\n\nRăspuns:"

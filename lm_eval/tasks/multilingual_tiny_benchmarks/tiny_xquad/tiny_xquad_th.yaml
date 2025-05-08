@@ -1,0 +1,4 @@
+include: tiny_xquad_common_yaml
+task: tiny_xquad_th
+dataset_name: tiny_xquad.th
+doc_to_text: "บริบท: {{context}}\n\nคำถาม: {{question}}\n\nคำตอบ:"

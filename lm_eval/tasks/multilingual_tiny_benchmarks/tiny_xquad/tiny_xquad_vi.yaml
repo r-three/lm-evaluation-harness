@@ -1,0 +1,4 @@
+include: tiny_xquad_common_yaml
+task: tiny_xquad_vi
+dataset_name: tiny_xquad.vi
+doc_to_text: "Bối cảnh: {{context}}\n\nCâu hỏi: {{question}}\n\nTrả lời:"
