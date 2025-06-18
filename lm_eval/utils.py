@@ -17,7 +17,6 @@ import numpy as np
 import yaml
 from jinja2 import BaseLoader, Environment, StrictUndefined
 
-
 SPACING = " " * 47
 
 HIGHER_IS_BETTER_SYMBOLS = {
@@ -482,6 +481,8 @@ def load_yaml_config(yaml_path=None, yaml_config=None, yaml_dir=None, mode="full
     if yaml_config is None:
         with open(yaml_path, "rb") as file:
             yaml_config = yaml.load(file, Loader=loader)
+    if yaml_config is None:
+        yaml_config = {}
 
     if yaml_dir is None:
         yaml_dir = os.path.dirname(yaml_path)
