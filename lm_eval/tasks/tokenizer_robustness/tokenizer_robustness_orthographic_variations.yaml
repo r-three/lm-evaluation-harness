@@ -1,0 +1,3 @@
+dataset_name: orthographic_variations
+include: tokenizer_robustness_base.yaml
+task: tokenizer_robustness_orthographic_variations

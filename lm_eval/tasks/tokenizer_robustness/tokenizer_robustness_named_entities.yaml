@@ -1,0 +1,3 @@
+dataset_name: named_entities
+include: tokenizer_robustness_base.yaml
+task: tokenizer_robustness_named_entities

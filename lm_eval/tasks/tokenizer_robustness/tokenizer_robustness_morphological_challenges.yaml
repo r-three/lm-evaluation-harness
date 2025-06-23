@@ -1,0 +1,3 @@
+dataset_name: morphological_challenges
+include: tokenizer_robustness_base.yaml
+task: tokenizer_robustness_morphological_challenges

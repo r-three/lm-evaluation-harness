@@ -1,0 +1,3 @@
+dataset_name: mathematical_scientific_notation
+include: tokenizer_robustness_base.yaml
+task: tokenizer_robustness_mathematical_scientific_notation

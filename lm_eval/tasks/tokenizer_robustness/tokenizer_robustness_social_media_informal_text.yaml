@@ -1,0 +1,3 @@
+dataset_name: social_media_informal_text
+include: tokenizer_robustness_base.yaml
+task: tokenizer_robustness_social_media_informal_text
