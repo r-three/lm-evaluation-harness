@@ -1,4 +1,4 @@
-include: tiny_xquad_common_yaml
+include: xquad_common_yaml
 task: tiny_xquad_tr
 dataset_name: tiny_xquad.tr
 doc_to_text: "Bağlam: {{context}}\n\nSoru: {{question}}\n\nCevap:"

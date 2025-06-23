@@ -1,4 +1,4 @@
-include: tiny_xquad_common_yaml
+include: xquad_common_yaml
 task: tiny_xquad_el
 dataset_name: tiny_xquad.el
 doc_to_text: "Συμφραζόμενα: {{context}}\n\nΕρώτηση: {{question}}\n\nΑπάντηση:"
