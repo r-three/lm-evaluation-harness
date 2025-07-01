@@ -1,10 +1,10 @@
 dataset_kwargs: null
 dataset_name: null
-dataset_path: gsaltintas/tokenization_robustness
+dataset_path: r-three/tokenization_robustness
 doc_to_choice: choices
 doc_to_target: answer
 doc_to_text: '{{ question.strip() }}'
-fewshot_split: dev
+fewshot_split: null
 metadata:
   description: Tokenization robustness evaluation dataset
   version: 1.0.2
