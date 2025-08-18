@@ -1,0 +1,3 @@
+dataset_name: cannonical
+include: eng_latn_named_entities_base.yaml
+task: eng_latn_named_entities_cannonical

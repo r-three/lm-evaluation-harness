@@ -1,0 +1,3 @@
+dataset_name: cannonical
+include: eng_latn_morphological_challenges_base.yaml
+task: eng_latn_morphological_challenges_cannonical

@@ -1,0 +1,15 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: ita_latn_tokenization_robustness
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- ita_latn_mathematical_scientific_notation
+- ita_latn_named_entities
+- ita_latn_script__orthography

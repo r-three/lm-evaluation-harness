@@ -1,0 +1,15 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: eng_latn_morphological_challenges
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- eng_latn_morphological_challenges_cannonical
+- eng_latn_morphological_challenges_contractions
+- eng_latn_morphological_challenges_compounds

@@ -1,0 +1,3 @@
+dataset_name: abbreviations_with_periods
+include: ita_latn_script__orthography_base.yaml
+task: ita_latn_script_orthography_abbreviations_with_periods

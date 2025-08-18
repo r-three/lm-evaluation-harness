@@ -1,0 +1,3 @@
+dataset_name: keyboard_proximity_errors
+include: pes_arab_noise_base.yaml
+task: pes_arab_noise_keyboard_proximity_errors

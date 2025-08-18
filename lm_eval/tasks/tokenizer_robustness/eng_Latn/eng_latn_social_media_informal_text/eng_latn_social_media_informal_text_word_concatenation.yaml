@@ -1,0 +1,3 @@
+dataset_name: word_concatenation
+include: eng_latn_social_media_informal_text_base.yaml
+task: eng_latn_social_media_informal_text_word_concatenation

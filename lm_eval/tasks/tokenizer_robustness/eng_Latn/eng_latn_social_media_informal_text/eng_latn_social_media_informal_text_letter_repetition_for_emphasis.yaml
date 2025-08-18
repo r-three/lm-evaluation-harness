@@ -1,0 +1,3 @@
+dataset_name: letter_repetition_for_emphasis
+include: eng_latn_social_media_informal_text_base.yaml
+task: eng_latn_social_media_informal_text_letter_repetition_for_emphasis

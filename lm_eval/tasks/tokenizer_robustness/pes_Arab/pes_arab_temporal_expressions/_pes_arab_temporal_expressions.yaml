@@ -1,0 +1,14 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: pes_arab_temporal_expressions
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- pes_arab_temporal_expressions_date_formats
+- pes_arab_temporal_expressions_cannonical

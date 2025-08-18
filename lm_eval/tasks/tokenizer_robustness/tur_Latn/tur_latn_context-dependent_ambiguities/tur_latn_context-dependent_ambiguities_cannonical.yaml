@@ -1,0 +1,3 @@
+dataset_name: cannonical
+include: tur_latn_context-dependent_ambiguities_base.yaml
+task: tur_latn_context-dependent_ambiguities_cannonical

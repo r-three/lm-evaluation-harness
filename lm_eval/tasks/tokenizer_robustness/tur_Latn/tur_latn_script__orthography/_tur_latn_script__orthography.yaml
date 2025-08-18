@@ -1,0 +1,15 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tur_latn_script__orthography
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tur_latn_script_orthography_diacritics_presence_absence
+- tur_latn_script_orthography_abbreviations_with_periods
+- tur_latn_script_orthography_cannonical

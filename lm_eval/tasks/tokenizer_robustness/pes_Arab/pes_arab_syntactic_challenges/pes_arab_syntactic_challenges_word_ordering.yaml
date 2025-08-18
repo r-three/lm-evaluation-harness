@@ -1,0 +1,3 @@
+dataset_name: word_ordering
+include: pes_arab_syntactic_challenges_base.yaml
+task: pes_arab_syntactic_challenges_word_ordering

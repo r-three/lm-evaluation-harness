@@ -1,0 +1,18 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tur_latn_tokenization_robustness
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tur_latn_mathematical_scientific_notation
+- tur_latn_script__orthography
+- tur_latn_morphological_challenges
+- tur_latn_named_entities
+- tur_latn_social_media_informal_text
+- tur_latn_context-dependent_ambiguities

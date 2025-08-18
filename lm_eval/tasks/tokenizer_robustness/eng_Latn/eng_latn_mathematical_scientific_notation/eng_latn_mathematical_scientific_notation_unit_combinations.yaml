@@ -1,0 +1,3 @@
+dataset_name: unit_combinations
+include: eng_latn_mathematical_scientific_notation_base.yaml
+task: eng_latn_mathematical_scientific_notation_unit_combinations

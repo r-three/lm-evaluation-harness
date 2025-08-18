@@ -1,0 +1,3 @@
+dataset_name: diacritics_presence_absence
+include: tur_latn_script__orthography_base.yaml
+task: tur_latn_script_orthography_diacritics_presence_absence

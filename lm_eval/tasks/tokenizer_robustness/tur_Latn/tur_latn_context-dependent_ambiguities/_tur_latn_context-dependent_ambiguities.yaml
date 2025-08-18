@@ -1,0 +1,15 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tur_latn_context-dependent_ambiguities
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tur_latn_context-dependent_ambiguities_cultural_references
+- tur_latn_context-dependent_ambiguities_wiki-jargon
+- tur_latn_context-dependent_ambiguities_cannonical

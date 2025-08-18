@@ -1,0 +1,19 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: eng_latn_code_technical_content
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- eng_latn_code_technical_content_buggy_code
+- eng_latn_code_technical_content_comments_across_languages
+- eng_latn_code_technical_content_string_literals
+- eng_latn_code_technical_content_whitespace_variations
+- eng_latn_code_technical_content_variable_naming_conventions
+- eng_latn_code_technical_content_cannonical
+- eng_latn_code_technical_content_syntax_and_punctuation_variations

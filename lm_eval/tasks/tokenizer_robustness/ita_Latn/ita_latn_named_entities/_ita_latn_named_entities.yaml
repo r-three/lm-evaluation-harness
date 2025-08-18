@@ -1,0 +1,15 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: ita_latn_named_entities
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- ita_latn_named_entities_cannonical
+- ita_latn_named_entities_special_names_across_cultures
+- ita_latn_named_entities_place_names_with_apostrophes

@@ -1,0 +1,16 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: zho_hans_tokenization_robustness
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- zho_hans_temporal_expressions
+- zho_hans_named_entities
+- zho_hans_script__orthography
+- zho_hans_mathematical_scientific_notation

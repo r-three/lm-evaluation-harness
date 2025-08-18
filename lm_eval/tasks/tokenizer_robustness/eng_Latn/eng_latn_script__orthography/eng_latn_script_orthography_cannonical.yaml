@@ -1,0 +1,3 @@
+dataset_name: cannonical
+include: eng_latn_script__orthography_base.yaml
+task: eng_latn_script_orthography_cannonical

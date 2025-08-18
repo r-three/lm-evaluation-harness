@@ -1,0 +1,18 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: eng_latn_social_media_informal_text
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- eng_latn_social_media_informal_text_cannonical
+- eng_latn_social_media_informal_text_deliberate_misspellings
+- eng_latn_social_media_informal_text_word_concatenation
+- eng_latn_social_media_informal_text_letter_repetition_for_emphasis
+- eng_latn_social_media_informal_text_emoji_substitution
+- eng_latn_social_media_informal_text_character_substitution
