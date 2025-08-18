@@ -1,0 +1,3 @@
+dataset_name: 20231101.zh
+include: wikipedia_default_yaml
+task: wikipedia_zh
