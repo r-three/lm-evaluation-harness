@@ -1,0 +1,39 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_completion_stem
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tokenizer_robustness_completion_stem_canonical
+- tokenizer_robustness_completion_stem_superscript_subscript
+- tokenizer_robustness_completion_stem_latex
+- tokenizer_robustness_completion_stem_compounds
+- tokenizer_robustness_completion_stem_locality-dependent_formats
+- tokenizer_robustness_completion_stem_enclosed_characters
+- tokenizer_robustness_completion_stem_fullwidth_characters
+- tokenizer_robustness_completion_stem_date_formats
+- tokenizer_robustness_completion_stem_additional_spaces
+- tokenizer_robustness_completion_stem_space_removal
+- tokenizer_robustness_completion_stem_unit_combinations
+- tokenizer_robustness_completion_stem_unicode_formatting
+- tokenizer_robustness_completion_stem_spelled_out
+- tokenizer_robustness_completion_stem_space_additions_for_natural_split
+- tokenizer_robustness_completion_stem_combining_diacritics
+- tokenizer_robustness_completion_stem_strikethrough
+- tokenizer_robustness_completion_stem_noise_injection
+- tokenizer_robustness_completion_stem_wiki-jargon
+- tokenizer_robustness_completion_stem_script
+- tokenizer_robustness_completion_stem_relative_time_expressions
+- tokenizer_robustness_completion_stem_upside_down_rotated
+- tokenizer_robustness_completion_stem_regional_spelling_variations
+- tokenizer_robustness_completion_stem_double_struck
+- tokenizer_robustness_completion_stem_ascii
+- tokenizer_robustness_completion_stem_unusual_formatting
+- tokenizer_robustness_completion_stem_cannonical
+- tokenizer_robustness_completion_stem_equivalent_expressions
