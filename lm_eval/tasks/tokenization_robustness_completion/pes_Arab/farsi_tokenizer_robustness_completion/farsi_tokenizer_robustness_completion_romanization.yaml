@@ -1,3 +1,0 @@
-dataset_name: romanization
-include: farsi_tokenizer_robustness_completion_base.yaml
-task: farsi_tokenizer_robustness_completion_romanization

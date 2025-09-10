@@ -1,3 +1,0 @@
-dataset_name: word_reordering
-include: farsi_tokenizer_robustness_completion_base.yaml
-task: farsi_tokenizer_robustness_completion_word_reordering
