@@ -43,6 +43,222 @@ from lm_eval.models.utils import (
 eval_logger = logging.getLogger(__name__)
 
 
+import argparse
+import collections
+import functools
+import json
+import logging
+import operator as op
+import os
+import re
+from typing import List, Optional
+
+import tokenizers
+import transformers
+import yaml
+
+
+Vocab = dict[str, list[int]]
+
+
+ALIGNED_BOS = "~SPECIAL~ALIGNED~BOS~SYMBOL~"
+
+
+class Tokenizer:
+    """Tokenizer wrapper that unifies interface."""
+
+    def __init__(self, name: str, tokenizer):
+        self._name = name
+        self.tokenizer = tokenizer
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def vocab_size(self):
+        return self.get_vocab_size()
+
+    def get_vocab_size(self):
+        return self.tokenizer.get_vocab_size()
+
+    def get_token(self, i):
+        raise NotImplementedError
+
+    def get_bos_str(self):
+        raise NotImplementedError
+
+    def info(self):
+        raise NotImplementedError
+
+    @classmethod
+    def load(cls, name):
+        if name.startswith("tokenmonster"):
+            return TokenMonsterTokenizer.load(name)
+        if name.startswith("tiktoken"):
+            tok = TikTokenTokenizer.load(name)
+            return tok
+        if "tekken" in name:
+            return MistralTokenizer.load(name)
+        return HFTokenizer.load(name)
+
+
+class HFTokenizer(Tokenizer):
+    def __init__(self, *args, bos_str: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bos_str = bos_str
+
+    def info(self):
+        return {"data": {"tokenizer": {"name": "huggingface", "path": self.name}}}
+
+    def get_vocab_size(self):
+        if "byt5" in self.name:
+            return self.tokenizer.vocab_size
+        return self.tokenizer.get_vocab_size()
+
+    def get_token(self, i):
+        if "byt5" in self.name:
+            token = self.tokenizer.convert_ids_to_tokens(i)
+            # We are a special value.
+            if len(token) > 1:
+                return token
+            as_int = ord(token)
+            as_bytes = bytes([as_int])
+            try:
+                return as_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                return as_int  # as_bytes
+        t = self.tokenizer.id_to_token(i)
+        if t == self.bos_str:
+            return ALIGNED_BOS
+        if isinstance(self.tokenizer.model, tokenizers.models.WordPiece):
+            # If it is not a continuation character, then it is the start of a word. Other tokenizers start the word with a subword token that has a space to start.
+            if not t.startswith("##"):
+                return f" {t}"
+            return re.sub(r"##([^#])", r"\1", t)
+        if isinstance(self.tokenizer.model, tokenizers.models.Unigram) or any(
+            n in self.name for n in ("gemma", "Phi-3", "Mistral-7B-Instruct-v0.3")
+        ):
+            # Replace whitespace handling with actual whitespace.
+            return t.replace("▁", " ")
+        # BPE models.
+        return real_unicode(t)
+
+    @classmethod
+    def load(cls, name):
+        try:
+            tok = hf_load_tokenizer(name)
+        except:
+            tok = transformers.AutoTokenizer.from_pretrained(name)
+        sts = getattr(tok, "special_tokens_map", {})
+        if "bert" in name:
+            bos_str = sts.get("cls_token")
+        elif "t5" in name:
+            bos_str = sts.get("pad_token")
+        else:
+            bos_str = sts.get("bos_token")
+        if hasattr(tok, "_tokenizer"):
+            tok = tok._tokenizer
+        return cls(name, tok, bos_str=bos_str)
+
+
+# Note, GPT4 and GPT4o don't have BOS
+class TikTokenTokenizer(Tokenizer):
+    def info(self):
+        return {
+            "data": {
+                "tokenizer": {"name": "tiktoken", "path": self.name.split("/")[-1]}
+            }
+        }
+
+    def get_token(self, i):
+        try:
+            b = self.tokenizer.decode_single_token_bytes(i)
+        except KeyError:
+            return f"~~~~~undefined {i}~~~~~~"
+        return b.decode("latin-1")
+
+    def get_vocab_size(self):
+        return self.tokenizer.n_vocab
+
+    @classmethod
+    def load(cls, name):
+        import tiktoken
+
+        tok = tiktoken.encoding_for_model(name.split("/")[-1])
+        return cls(name, tok)
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.encode(s)
+        if return_tensors == "pt":
+            return torch.tensor(ids, dtype=torch.long)
+        return ids
+
+
+class TokenMonsterTokenizer(Tokenizer):
+    def info(self):
+        return {
+            "data": {
+                "tokenizer": {"name": "tokenmonster", "path": self.name.split("/")[-1]}
+            }
+        }
+
+    def get_token(self, i):
+        return self.tokenizer.id_to_token(i)
+
+    def get_vocab_size(self):
+        return self.tokenizer.vocab_size
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.tokenize(s)
+        if return_tensors == "pt":
+            import torch
+
+            return torch.tensor(ids, dtype=torch.long)
+        return list(ids)
+
+        return ids
+
+    def decode(self, tokens: List[int]):
+        return self.tokenizer.decode(tokens)
+
+    @classmethod
+    def load(cls, name):
+        import tokenmonster
+
+        tok = tokenmonster.load(name.split("/")[-1])
+        return cls(name, tok)
+
+
+class MistralTokenizer(Tokenizer):
+    def info(self):
+        return {"data": {"tokenizer": {"name": "tekken", "path": "tekken"}}}
+
+    def get_token(self, i):
+        if i == self.tokenizer.bos_id:
+            return ALIGNED_BOS
+        return self.tokenizer.id_to_piece(i)
+
+    def get_vocab_size(self):
+        return self.tokenizer.n_words
+
+    @classmethod
+    def load(cls, name):
+        from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+
+        tok = MistralTokenizer.v3(is_tekken=True)
+        tok = tok.instruct_tokenizer.tokenizer
+        return cls(name, tok)
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.encode(s, bos=False, eos=False)
+        if return_tensors == "pt":
+            import torch
+
+            return torch.tensor([ids], dtype=torch.long)
+        return ids
+
+
 @register_model("hf-auto", "hf", "huggingface")
 class HFLM(TemplateLM):
     """
@@ -69,6 +285,9 @@ class HFLM(TemplateLM):
                 transformers.PreTrainedTokenizerFast,
             ]
         ] = None,
+        tokenizer_backend: Optional[
+            Literal["tiktoken", "huggingface", "None", "none"]
+        ] = "huggingface",
         truncation: Optional[bool] = False,
         logits_cache: bool = True,
         max_length: Optional[int] = None,
@@ -176,7 +395,9 @@ class HFLM(TemplateLM):
         self._get_backend(
             config=self.config, backend=backend, trust_remote_code=trust_remote_code
         )
-
+        self.tokenizer_backend = (
+            None if tokenizer_backend in ("None", "none") else tokenizer_backend
+        )
         # load tokenizer so we know tokenizer vocabulary size before loading model and PEFT
         self._create_tokenizer(
             pretrained,
@@ -218,7 +439,11 @@ class HFLM(TemplateLM):
         self.logits_cache = logits_cache
         self.vocab_size = self.tokenizer.vocab_size
         # select (or create) a pad token to use
-        self.tokenizer = configure_pad_token(self.tokenizer, model_config=self.config)
+        if "supertoken" not in pretrained.lower():
+            ### TODO check this
+            self.tokenizer = configure_pad_token(
+                self.tokenizer, model_config=self.config
+            )
 
         self.add_bos_token = add_bos_token
         if "gemma" in getattr(self.config, "model_type", ""):
@@ -704,6 +929,17 @@ class HFLM(TemplateLM):
         Create a tokenizer object corresponding to the correct
         tokenizer for value of `pretrained`, or use the pre-initialized tokenizer passed.
         """
+        if pretrained and "supertoken" in pretrained.lower():
+            if "tokenmonster" in pretrained.lower():
+                self.tokenizer = TokenMonsterTokenizer.load(tokenizer)
+            elif "tiktoken" in pretrained.lower():
+                self.tokenizer = TikTokenTokenizer.load(tokenizer)
+            elif "tekken" in pretrained.lower():
+                self.tokenizer = MistralTokenizer.load(tokenizer)
+            else:
+                self.tokenizer = HFTokenizer.load(tokenizer)
+            return
+
         kwargs = {
             "revision": revision,
             "trust_remote_code": trust_remote_code,
