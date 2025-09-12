@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 import copy
 import logging
 import os
-from collections.abc import Iterator, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import jinja2
 import torch
@@ -20,7 +17,8 @@ from accelerate import (
 from accelerate.utils import get_max_memory
 from huggingface_hub import HfApi
 from packaging import version
-from packaging.version import parse as vparse
+from peft import PeftModel
+from peft import __version__ as PEFT_VERSION
 from tqdm import tqdm
 from transformers.models.auto.modeling_auto import (
     MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
@@ -28,6 +26,7 @@ from transformers.models.auto.modeling_auto import (
 )
 
 from lm_eval import utils
+from lm_eval.api.instance import Instance
 from lm_eval.api.model import TemplateLM
 from lm_eval.api.registry import register_model
 from lm_eval.models.utils import (
@@ -37,32 +36,253 @@ from lm_eval.models.utils import (
     get_dtype,
     handle_stop_sequences,
     pad_and_concat,
-    postprocess_generated_text,
     stop_sequences_criteria,
 )
 
-# Import your custom tokenizer classes - adjust the import path as needed
-try:
-    from lm_eval.models.tokenizers_module import Tokenizer, TikTokenTokenizer, TokenMonsterTokenizer, MistralTokenizer
-    CUSTOM_TOKENIZERS_AVAILABLE = True
-except ImportError:
-    CUSTOM_TOKENIZERS_AVAILABLE = False
-
-if TYPE_CHECKING:
-    from transformers.quantizers.auto import AutoQuantizationConfig
-
-    from lm_eval.api.instance import Instance
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 eval_logger = logging.getLogger(__name__)
-TOKENIZER_INFINITY = 1000000000000000019884624838656
 
-if not CUSTOM_TOKENIZERS_AVAILABLE:
-    eval_logger.warning("Custom tokenizers not available. Only HuggingFace tokenizers will be supported.")
+
+import argparse
+import collections
+import functools
+import json
+import logging
+import operator as op
+import os
+import re
+from typing import List, Optional
+
+import tokenizers
+import transformers
+import yaml
+
+
+Vocab = dict[str, list[int]]
+
+
+ALIGNED_BOS = "~SPECIAL~ALIGNED~BOS~SYMBOL~"
+
+def hf_load_tokenizer(model_name: str) -> AutoTokenizer:
+    """Load a tokenizer for the specified model.
+    If tokenizer available locally, uses the local path"""
+    print(f"Loading tokenizer for model {model_name}")
+    kwargs = dict()
+    if "aya" in model_name.lower():
+        kwargs["use_fast"] = True
+
+    model_path = model_name
+    return AutoTokenizer.from_pretrained(model_path, **kwargs)
+
+class Tokenizer:
+    """Tokenizer wrapper that unifies interface."""
+
+    def __init__(self, name: str, tokenizer):
+        self._name = name
+        self.tokenizer = tokenizer
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def vocab_size(self):
+        return self.get_vocab_size()
+
+    def get_vocab_size(self):
+        return self.tokenizer.get_vocab_size()
+
+    def get_token(self, i):
+        raise NotImplementedError
+
+    def get_bos_str(self):
+        raise NotImplementedError
+
+    def info(self):
+        raise NotImplementedError
+
+    @classmethod
+    def load(cls, name):
+        if name.startswith("tokenmonster"):
+            return TokenMonsterTokenizer.load(name)
+        if name.startswith("tiktoken"):
+            tok = TikTokenTokenizer.load(name)
+            return tok
+        if "tekken" in name:
+            return MistralTokenizer.load(name)
+        return HFTokenizer.load(name)
+
+
+class HFTokenizer(Tokenizer):
+    def __init__(self, *args, bos_str: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bos_str = bos_str
+
+    def info(self):
+        return {"data": {"tokenizer": {"name": "huggingface", "path": self.name}}}
+
+    def get_vocab_size(self):
+        if "byt5" in self.name:
+            return self.tokenizer.vocab_size
+        return self.tokenizer.get_vocab_size()
+
+    def get_token(self, i):
+        if "byt5" in self.name:
+            token = self.tokenizer.convert_ids_to_tokens(i)
+            # We are a special value.
+            if len(token) > 1:
+                return token
+            as_int = ord(token)
+            as_bytes = bytes([as_int])
+            try:
+                return as_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                return as_int  # as_bytes
+        t = self.tokenizer.id_to_token(i)
+        if t == self.bos_str:
+            return ALIGNED_BOS
+        if isinstance(self.tokenizer.model, tokenizers.models.WordPiece):
+            # If it is not a continuation character, then it is the start of a word. Other tokenizers start the word with a subword token that has a space to start.
+            if not t.startswith("##"):
+                return f" {t}"
+            return re.sub(r"##([^#])", r"\1", t)
+        if isinstance(self.tokenizer.model, tokenizers.models.Unigram) or any(
+            n in self.name for n in ("gemma", "Phi-3", "Mistral-7B-Instruct-v0.3")
+        ):
+            # Replace whitespace handling with actual whitespace.
+            return t.replace("▁", " ")
+        # BPE models.
+        return real_unicode(t)
+
+    # def encode(self, input_text):
+    #     encoded_output = self.tokenizer.encode(input_text)
+    #     if hasattr(encoded_output, "tokens"):  # Case: tokenizers.Tokenizer object
+    #         return encoded_output.tokens
+    #     elif isinstance(encoded_output, list):  # Case: already a list of strings
+    #         return encoded_output
+    #     else:
+    #         raise ValueError("Unexpected return type from tokenizer.encode()")
+
+    @classmethod
+    def load(cls, name):
+        try:
+            tok = hf_load_tokenizer(name)
+        except:
+            tok = transformers.AutoTokenizer.from_pretrained(name)
+        sts = getattr(tok, "special_tokens_map", {})
+        if "bert" in name:
+            bos_str = sts.get("cls_token")
+        elif "t5" in name:
+            bos_str = sts.get("pad_token")
+        else:
+            bos_str = sts.get("bos_token")
+        if hasattr(tok, "_tokenizer"):
+            tok = tok._tokenizer
+        return cls(name, tok, bos_str=bos_str)
+
+
+# Note, GPT4 and GPT4o don't have BOS
+class TikTokenTokenizer(Tokenizer):
+    def info(self):
+        return {
+            "data": {
+                "tokenizer": {"name": "tiktoken", "path": self.name.split("/")[-1]}
+            }
+        }
+
+    def get_token(self, i):
+        try:
+            b = self.tokenizer.decode_single_token_bytes(i)
+        except KeyError:
+            return f"~~~~~undefined {i}~~~~~~"
+        return b.decode("latin-1")
+
+    def get_vocab_size(self):
+        return self.tokenizer.n_vocab
+
+    @classmethod
+    def load(cls, name):
+        import tiktoken
+
+        tok = tiktoken.encoding_for_model(name.split("/")[-1])
+        return cls(name, tok)
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.encode(s)
+        if return_tensors == "pt":
+            return torch.tensor(ids, dtype=torch.long)
+        return ids
+
+
+class TokenMonsterTokenizer(Tokenizer):
+    def info(self):
+        return {
+            "data": {
+                "tokenizer": {"name": "tokenmonster", "path": self.name.split("/")[-1]}
+            }
+        }
+
+    def get_token(self, i):
+        return self.tokenizer.id_to_token(i)
+
+    def get_vocab_size(self):
+        return self.tokenizer.vocab_size
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.tokenize(s)
+        if return_tensors == "pt":
+            import torch
+
+            return torch.tensor(ids, dtype=torch.long)
+        return list(ids)
+
+        return ids
+
+    def decode(self, tokens: List[int]):
+        return self.tokenizer.decode(tokens)
+
+    @classmethod
+    def load(cls, name):
+        import tokenmonster
+
+        tok = tokenmonster.load(name.split("/")[-1])
+        return cls(name, tok)
+
+
+class MistralTokenizer(Tokenizer):
+    def info(self):
+        return {"data": {"tokenizer": {"name": "tekken", "path": "tekken"}}}
+
+    def get_token(self, i):
+        if i == self.tokenizer.bos_id:
+            return ALIGNED_BOS
+        return self.tokenizer.id_to_piece(i)
+
+    def get_vocab_size(self):
+        return self.tokenizer.n_words
+
+    @classmethod
+    def load(cls, name):
+        from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+
+        tok = MistralTokenizer.v3(is_tekken=True)
+        tok = tok.instruct_tokenizer.tokenizer
+        return cls(name, tok)
+
+    def encode(self, s: str, return_tensors: Optional[str] = None, **kwargs):
+        ids = self.tokenizer.encode(s, bos=False, eos=False)
+        if return_tensors == "pt":
+            import torch
+
+            return torch.tensor([ids], dtype=torch.long)
+        return ids
 
 
 @register_model("hf-auto", "hf", "huggingface")
 class HFLM(TemplateLM):
-    """An abstracted Huggingface model class. Enables usage with both models of
+    """
+    An abstracted Huggingface model class. Enables usage with both models of
     `transformers.AutoModelForCausalLM` and `transformers.AutoModelForSeq2SeqLM` classes.
 
     Supports data-parallel multi-GPU with HF Accelerate.
@@ -73,45 +293,45 @@ class HFLM(TemplateLM):
 
     def __init__(
         self,
-        pretrained: str | transformers.PreTrainedModel,
+        pretrained: Union[str, transformers.PreTrainedModel],
         backend: Literal["default", "causal", "seq2seq"] = "default",
         # override whether the model should be treated as decoder-only (causal) or encoder-decoder (seq2seq)
-        revision: str | None = "main",
-        subfolder: str = "",
-        tokenizer: str
-        | transformers.PreTrainedTokenizer
-        | transformers.PreTrainedTokenizerFast
-        | None = None,
-        truncation: bool | None = False,
+        revision: Optional[str] = "main",
+        subfolder: Optional[str] = None,
+        tokenizer: Optional[
+            Union[
+                str,
+                transformers.PreTrainedTokenizer,
+                transformers.PreTrainedTokenizerFast,
+            ]
+        ] = None,
+        tokenizer_backend: Optional[
+            Literal["tiktoken", "huggingface", "None", "none"]
+        ] = "huggingface",
+        truncation: Optional[bool] = False,
         logits_cache: bool = True,
-        max_length: int | None = None,
-        device: str | None = "cuda",
-        dtype: str | torch.dtype | None = "auto",
-        softmax_dtype: str | torch.dtype | None = None,
-        mixed_precision_dtype: str | torch.dtype | None = None,
-        batch_size: int | str | None = 1,
-        max_batch_size: int | None = 64,
-        trust_remote_code: bool | None = False,
-        use_fast_tokenizer: bool | None = True,
-        add_bos_token: bool | None = False,
-        prefix_token_id: int | None = None,
+        max_length: Optional[int] = None,
+        device: Optional[str] = "cuda",
+        dtype: Optional[Union[str, torch.dtype]] = "auto",
+        softmax_dtype: Optional[Union[str, torch.dtype]] = None,
+        batch_size: Optional[Union[int, str]] = 1,
+        max_batch_size: Optional[int] = 64,
+        trust_remote_code: Optional[bool] = False,
+        use_fast_tokenizer: Optional[bool] = True,
+        add_bos_token: Optional[bool] = False,
+        prefix_token_id: Optional[int] = None,
         # arguments used for splitting a model across GPUs naively.
         # only used if `parallelize=True`.
-        parallelize: bool | None = False,
-        max_memory_per_gpu: int | str | None = None,
-        max_cpu_memory: int | str | None = None,
-        offload_folder: str | os.PathLike | None = "./offload",
+        parallelize: Optional[bool] = False,
+        max_memory_per_gpu: Optional[Union[int, str]] = None,
+        max_cpu_memory: Optional[Union[int, str]] = None,
+        offload_folder: Optional[Union[str, os.PathLike]] = "./offload",
         # PEFT, delta weights and quantization options
-        peft: str | None = None,
-        delta: str | None = None,
-        autogptq: bool | str | None = False,
-        gptqmodel: bool | None = False,
-        gguf_file: str | None = None,
-        # end token for thinking, either the string or int token id.
-        # splits to get response after this token (if provided).
-        think_end_token: str | int | None = None,
-        enable_thinking: bool | None = None,
-        chat_template_args: dict[str, Any] | None = None,
+        peft: Optional[str] = None,
+        delta: Optional[str] = None,
+        autogptq: Optional[Union[bool, str]] = False,
+        gptqmodel: Optional[bool] = False,
+        gguf_file: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -181,38 +401,33 @@ class HFLM(TemplateLM):
                 )
 
             revision = str(revision)  # cast to string if not already one
+            # TODO: update this to be less of a hack once subfolder is fixed in HF
+            revision = revision + ("/" + subfolder if subfolder is not None else "")
 
             self._get_config(
                 pretrained,
                 revision=revision,
                 trust_remote_code=trust_remote_code,
                 gguf_file=gguf_file,
-                subfolder=subfolder,
             )
 
             # determine which of 'causal' and 'seq2seq' backends to use for HF models
         self._get_backend(
             config=self.config, backend=backend, trust_remote_code=trust_remote_code
         )
-
+        self.tokenizer_backend = (
+            None if tokenizer_backend in ("None", "none") else tokenizer_backend
+        )
         # load tokenizer so we know tokenizer vocabulary size before loading model and PEFT
         self._create_tokenizer(
             pretrained,
             tokenizer,
             revision=revision,
-            subfolder=subfolder,
             trust_remote_code=trust_remote_code,
             use_fast_tokenizer=use_fast_tokenizer,
             gguf_file=gguf_file,
             add_bos_token=add_bos_token,
         )
-
-        if (
-            quantization_config := getattr(self.config, "quantization_config", None)
-        ) is not None and isinstance(quantization_config, dict):
-            from transformers.quantizers import AutoQuantizationConfig
-
-            quantization_config = AutoQuantizationConfig.from_dict(quantization_config)
 
         # if we passed `pretrained` as a string, initialize our model now
         if isinstance(pretrained, str):
@@ -231,8 +446,7 @@ class HFLM(TemplateLM):
                 autogptq=autogptq,
                 gptqmodel=gptqmodel,
                 gguf_file=gguf_file,
-                quantization_config=quantization_config,
-                subfolder=subfolder,
+                quantization_config=getattr(self.config, "quantization_config", None),
                 **kwargs,
             )
 
@@ -241,21 +455,15 @@ class HFLM(TemplateLM):
             self.model.eval()
             self.model.tie_weights()
 
-        self.think_end_token = (
-            int(think_end_token)
-            if (isinstance(think_end_token, str) and think_end_token.isdigit())
-            else think_end_token
-        )
         self.truncation = truncation
         self.logits_cache = logits_cache
         self.vocab_size = self.tokenizer.vocab_size
         # select (or create) a pad token to use
-        self.tokenizer = configure_pad_token(self.tokenizer, model_config=self.config)
-        self.chat_template_args = (
-            chat_template_args or {} | dict(enable_thinking=enable_thinking)
-            if enable_thinking is not None
-            else {}
-        )
+        if "supertoken" not in pretrained.lower():
+            ### TODO check this
+            self.tokenizer = configure_pad_token(
+                self.tokenizer, model_config=self.config
+            )
 
         self.add_bos_token = add_bos_token
         if "gemma" in getattr(self.config, "model_type", ""):
@@ -275,11 +483,6 @@ class HFLM(TemplateLM):
         self.softmax_dtype = (
             get_dtype(softmax_dtype) if softmax_dtype is not None else None
         )
-        self.mixed_precision_dtype = (
-            get_dtype(mixed_precision_dtype)
-            if mixed_precision_dtype is not None
-            else None
-        )
 
         if str(batch_size).startswith("auto"):
             batch_size = batch_size.split(":")
@@ -289,19 +492,18 @@ class HFLM(TemplateLM):
             self.batch_size_per_gpu = int(batch_size)
 
         if isinstance(pretrained, str):
-            if (gpus >= 1 or str(self.device) == "mps") and not (
-                parallelize or autogptq or hasattr(self, "accelerator")
-            ):
+            if gpus >= 1 or str(self.device) == "mps":
                 # TODO: can remove this whole snippet except in the mps case, perhaps?
-                # place model onto device requested manually,
-                # if not using HF Accelerate or device_map
-                # or any other option that preloads model onto device
-                try:
-                    self.model.to(self.device)
-                except ValueError:
-                    eval_logger.debug(
-                        "Failed to place model onto specified device. This may be because the model is quantized via `bitsandbytes` or `device_map` is provided. If the desired GPU is being used, this message is safe to ignore."
-                    )
+                if not (parallelize or autogptq or hasattr(self, "accelerator")):
+                    # place model onto device requested manually,
+                    # if not using HF Accelerate or device_map
+                    # or any other option that preloads model onto device
+                    try:
+                        self.model.to(self.device)
+                    except ValueError:
+                        eval_logger.debug(
+                            "Failed to place model onto specified device. This may be because the model is quantized via `bitsandbytes` or `device_map` is provided. If the desired GPU is being used, this message is safe to ignore."
+                        )
             # multigpu data-parallel support when launched with accelerate
             if gpus > 1:
                 if accelerator.num_processes > 1:
@@ -344,423 +546,14 @@ class HFLM(TemplateLM):
                 f"Loglikelihood prefix token id used in evaluation: {self.prefix_token_id}"
             )
 
-    def _should_use_custom_tokenizer(self, tokenizer_name: str) -> bool:
-        """Determine if we should use a custom tokenizer based on tokenizer name."""
-        
-        if not CUSTOM_TOKENIZERS_AVAILABLE:
-            return False
-            
-        # Check for explicit custom tokenizer specifications from your TOKENIZER_NAMES
-        custom_tokenizers = {
-            "tokenmonster/english-32000-balanced-v1",
-            "tiktoken/gpt-4",
-            "tiktoken/gpt-4o", 
-            "mistralai/tekken"
-        }
-        
-        return tokenizer_name in custom_tokenizers
-
-    def _wrap_custom_tokenizer(self, custom_tokenizer) -> object:
-        """Create a wrapper that makes custom tokenizers compatible with HF interface."""
-        
-        class CustomTokenizerWrapper:
-            def __init__(self, custom_tok):
-                self.custom_tokenizer = custom_tok
-                self._vocab_size = custom_tok.get_vocab_size()
-                # Set some required attributes for HF compatibility
-                self.name_or_path = custom_tok.name
-                self.padding_side = "left"  # Default padding side
-                
-                # Build token-to-ID mapping for TokenMonster
-                self._build_token_mappings()
-                
-                # Setup special tokens based on tokenizer type
-                self._setup_special_tokens()
-                
-            def _build_token_mappings(self):
-                """Build token-to-ID and ID-to-token mappings."""
-                self.token_to_id_map = {}
-                self.id_to_token_map = {}
-                
-                # Build mappings for all tokenizers
-                for i in range(self._vocab_size):
-                    try:
-                        token = self.custom_tokenizer.get_token(i)
-                        self.id_to_token_map[i] = token
-                        self.token_to_id_map[token] = i
-                    except:
-                        continue
-                        
-            def _setup_special_tokens(self):
-                """Setup special token IDs based on tokenizer type."""
-                # Default values
-                self.eos_token_id = None
-                self.bos_token_id = None
-                self.pad_token_id = None
-                
-                if isinstance(self.custom_tokenizer, TikTokenTokenizer):
-                    # GPT-4 and GPT-4o tiktoken tokenizers
-                    if "gpt-4" in self.custom_tokenizer.name.lower():
-                        # Try to find the actual <|endoftext|> token
-                        try:
-                            # For tiktoken, try to encode the special token to get its ID
-                            eot_ids = self.custom_tokenizer.tokenizer.encode("<|endoftext|>")
-                            if eot_ids:
-                                self.eos_token_id = eot_ids[0]
-                            else:
-                                self.eos_token_id = 100257  # Fallback
-                        except:
-                            self.eos_token_id = 100257  # Standard GPT-4 endoftext token
-                        self.pad_token_id = self.eos_token_id
-                    else:
-                        # Generic tiktoken handling
-                        vocab_size = self.custom_tokenizer.get_vocab_size()
-                        self.eos_token_id = vocab_size - 1
-                        self.pad_token_id = self.eos_token_id
-                    
-                elif isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                    # TokenMonster - try to find appropriate special tokens
-                    vocab_size = self.custom_tokenizer.get_vocab_size()
-                    
-                    # Look for common special tokens
-                    special_candidates = ["<|endoftext|>", "</s>", "<eos>", "<end>"]
-                    for candidate in special_candidates:
-                        if candidate in self.token_to_id_map:
-                            self.eos_token_id = self.token_to_id_map[candidate]
-                            break
-                    
-                    if self.eos_token_id is None:
-                        self.eos_token_id = vocab_size - 1  # Last token as fallback
-                    
-                    # Pad token - look for padding candidates
-                    pad_candidates = ["<pad>", "<|pad|>", ""]
-                    for candidate in pad_candidates:
-                        if candidate in self.token_to_id_map:
-                            self.pad_token_id = self.token_to_id_map[candidate]
-                            break
-                    
-                    if self.pad_token_id is None:
-                        self.pad_token_id = 0  # First token as fallback
-                    
-                elif isinstance(self.custom_tokenizer, MistralTokenizer):
-                    # Mistral tekken tokenizer
-                    if hasattr(self.custom_tokenizer.tokenizer, 'bos_id'):
-                        self.bos_token_id = self.custom_tokenizer.tokenizer.bos_id
-                    if hasattr(self.custom_tokenizer.tokenizer, 'eos_id'):
-                        self.eos_token_id = self.custom_tokenizer.tokenizer.eos_id
-                    
-                    # For tekken, try to get proper special tokens
-                    if self.eos_token_id is None:
-                        vocab_size = self.custom_tokenizer.get_vocab_size()
-                        self.eos_token_id = vocab_size - 1
-                    
-                    # Use EOS as pad if no dedicated pad token
-                    self.pad_token_id = self.eos_token_id if self.eos_token_id else 0
-            
-            @property
-            def vocab_size(self):
-                return self._vocab_size
-            
-            @property 
-            def pad_token(self):
-                """Return pad token string if available."""
-                if self.pad_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.pad_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def eos_token(self):
-                """Return EOS token string if available."""
-                if self.eos_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.eos_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def bos_token(self):
-                """Return BOS token string if available.""" 
-                if self.bos_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.bos_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def model_max_length(self):
-                """Return a reasonable max length."""
-                return 4096  # Default reasonable length
-                
-            def get_vocab(self):
-                """Return vocabulary mapping."""
-                return self.token_to_id_map
-                
-            def encode(self, text, add_special_tokens=True, **kwargs):
-                """Encode text to token IDs."""
-                # Handle different tokenizer return types
-                if isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                     token_ids = [int(t) for t in self.custom_tokenizer.tokenize(text)]
-                else:
-                    # TikToken and Mistral return token IDs directly
-                    token_ids = self.custom_tokenizer.tokenize(text)
-                
-                # Handle add_special_tokens if needed
-                if add_special_tokens and self.bos_token_id is not None:
-                    token_ids = [self.bos_token_id] + token_ids
-                    
-                return token_ids
-                
-            def decode(self, token_ids, skip_special_tokens=True, **kwargs):
-                """Decode token IDs to text."""
-                if hasattr(token_ids, 'tolist'):  # Handle torch tensors
-                    token_ids = token_ids.tolist()
-                    
-                # Filter special tokens if requested
-                if skip_special_tokens:
-                    special_tokens = {self.eos_token_id, self.bos_token_id, self.pad_token_id}
-                    special_tokens = {t for t in special_tokens if t is not None}
-                    token_ids = [tid for tid in token_ids if tid not in special_tokens]
-                
-                # Convert token IDs back to text
-                try:
-                    if isinstance(self.custom_tokenizer, TikTokenTokenizer):
-                        # TikToken can decode directly from IDs
-                        try:
-                            return self.custom_tokenizer.tokenizer.decode(token_ids)
-                        except:
-                            # Fallback to token-by-token
-                            tokens = [self.custom_tokenizer.get_token(tid) for tid in token_ids if tid < self._vocab_size]
-                            return ''.join(tokens)
-                    
-                    elif isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                        # TokenMonster: convert IDs to tokens then join
-                        tokens = []
-                        for tid in token_ids:
-                            if tid < self._vocab_size and tid in self.id_to_token_map:
-                                token = self.id_to_token_map[tid]
-                                tokens.append(token)
-                        
-                        # TokenMonster tokens should join directly
-                        return ''.join(tokens)
-                    
-                    elif isinstance(self.custom_tokenizer, MistralTokenizer):
-                        # Mistral/Tekken: handle piece-based tokens
-                        tokens = []
-                        for tid in token_ids:
-                            if tid < self._vocab_size:
-                                token = self.custom_tokenizer.get_token(tid)
-                                tokens.append(token)
-                        
-                        # Join and handle space markers (▁ -> space)
-                        text = ''.join(tokens)
-                        # Replace sentencepiece space marker with actual spaces
-                        text = text.replace('▁', ' ')
-                        return text.strip()  # Remove leading/trailing spaces
-                    
-                    else:
-                        # Generic fallback
-                        tokens = [self.custom_tokenizer.get_token(tid) for tid in token_ids if tid < self._vocab_size]
-                        return ''.join(tokens)
-                        
-                except Exception as e:
-                    eval_logger.warning(f"Failed to decode tokens {token_ids[:10]}...: {e}")
-                    return ""
-            
-            def __call__(self, text, padding=False, truncation=False, max_length=None, 
-                        return_tensors=None, add_special_tokens=True, **kwargs):
-                """Callable interface for batch processing."""
-                if isinstance(text, str):
-                    texts = [text]
-                    single_input = True
-                else:
-                    texts = text
-                    single_input = False
-                    
-                # Encode all texts
-                all_token_ids = []
-                for t in texts:
-                    token_ids = self.encode(t, add_special_tokens=add_special_tokens)
-                    
-                    # Handle truncation
-                    if truncation and max_length and len(token_ids) > max_length:
-                        token_ids = token_ids[:max_length]
-                        
-                    all_token_ids.append(token_ids)
-                
-                # Handle padding
-                if padding and len(all_token_ids) > 1:
-                    max_len = max(len(ids) for ids in all_token_ids)
-                    if max_length:
-                        max_len = min(max_len, max_length)
-                        
-                    pad_id = self.pad_token_id if self.pad_token_id is not None else 0
-                    
-                    for i, token_ids in enumerate(all_token_ids):
-                        if len(token_ids) < max_len:
-                            if self.padding_side == "left":
-                                all_token_ids[i] = [pad_id] * (max_len - len(token_ids)) + token_ids
-                            else:
-                                all_token_ids[i] = token_ids + [pad_id] * (max_len - len(token_ids))
-                
-                # Create attention masks
-                attention_masks = []
-                pad_id = self.pad_token_id if self.pad_token_id is not None else 0
-                for token_ids in all_token_ids:
-                    mask = [1 if tid != pad_id else 0 for tid in token_ids]
-                    attention_masks.append(mask)
-                
-                result = {
-                    "input_ids": all_token_ids[0] if single_input else all_token_ids,
-                    "attention_mask": attention_masks[0] if single_input else attention_masks
-                }
-                
-                # Convert to tensors if requested
-                if return_tensors == "pt":
-                    if single_input:
-                        result["input_ids"] = torch.tensor([result["input_ids"]])
-                        result["attention_mask"] = torch.tensor([result["attention_mask"]])
-                    else:
-                        result["input_ids"] = torch.tensor(result["input_ids"])
-                        result["attention_mask"] = torch.tensor(result["attention_mask"])
-                
-                return result
-            
-            def _validate_encoding(self, test_text="Hello, world!"):
-                """Validate that encoding->decoding preserves the original text."""
-                try:
-                    token_ids = self.encode(test_text, add_special_tokens=False)
-                    decoded_text = self.decode(token_ids, skip_special_tokens=True)
-                    
-                    if decoded_text == test_text:
-                        eval_logger.info(f"Tokenizer validation passed for '{test_text}'")
-                        return True
-                    else:
-                        eval_logger.warning(
-                            f"Tokenizer validation failed:\n"
-                            f"  Original: '{test_text}'\n"
-                            f"  Decoded:  '{decoded_text}'\n"
-                            f"  Token IDs: {token_ids}"
-                        )
-                        return False
-                except Exception as e:
-                    eval_logger.error(f"Tokenizer validation error: {e}")
-                    return False
-                
-        wrapper = CustomTokenizerWrapper(custom_tokenizer)
-        
-        # Validate the tokenizer works correctly
-        wrapper._validate_encoding()
-        
-        return wrapper
-
-    def _create_tokenizer(
-        self,
-        pretrained: str | transformers.PreTrainedModel,
-        tokenizer: str
-        | transformers.PreTrainedTokenizer
-        | transformers.PreTrainedTokenizerFast
-        | None,
-        revision: str | None = "main",
-        trust_remote_code: bool | None = False,
-        use_fast_tokenizer: bool | None = True,
-        gguf_file: str | None = None,
-        add_bos_token: bool | None = False,
-        subfolder: str | None = "",
-    ) -> None:
-        """Helper method during initialization.
-
-        Create a tokenizer object corresponding to the correct
-        tokenizer for value of `pretrained`, or use the pre-initialized tokenizer passed.
-        Supports custom tokenizers: TokenMonster, TikToken, and Tekken.
-        """
-        
-        # If a tokenizer object is already provided, use it directly
-        if tokenizer and not isinstance(tokenizer, str):
-            assert isinstance(
-                tokenizer,
-                (
-                    transformers.PreTrainedTokenizer,
-                    transformers.PreTrainedTokenizerFast,
-                ),
-            )
-            self.tokenizer = tokenizer
-            return
-
-        # Determine tokenizer name - use explicit tokenizer if provided
-        tokenizer_name = tokenizer if isinstance(tokenizer, str) else None
-        
-        # Check if we should use a custom tokenizer based on tokenizer name
-        if tokenizer_name and self._should_use_custom_tokenizer(tokenizer_name):
-            try:
-                # Load custom tokenizer using your Tokenizer.load method
-                custom_tokenizer = Tokenizer.load(tokenizer_name)
-                
-                # Create a wrapper that implements the HF tokenizer interface
-                self.tokenizer = self._wrap_custom_tokenizer(custom_tokenizer)
-                eval_logger.info(f"Successfully loaded custom tokenizer: {tokenizer_name}")
-                return
-            except Exception as e:
-                eval_logger.error(f"Failed to load custom tokenizer '{tokenizer_name}': {e}")
-                raise RuntimeError(f"Custom tokenizer '{tokenizer_name}' could not be loaded. "
-                                 f"Make sure your custom tokenizer classes are properly installed and imported.") from e
-
-        # Fall back to standard HF tokenizer loading
-        kwargs = {
-            "revision": revision,
-            "trust_remote_code": trust_remote_code,
-        }
-
-        # gguf format embeds tokenizer and is not compatible with hf tokenizer `use_fast` param
-        if not tokenizer and gguf_file is not None:
-            kwargs["gguf_file"] = gguf_file
-        else:
-            kwargs["use_fast"] = use_fast_tokenizer
-
-        if add_bos_token:
-            kwargs["add_bos_token"] = True
-
-        if subfolder:
-            kwargs["subfolder"] = subfolder
-
-        # Get tokenizer based on 'pretrained' or explicit tokenizer name
-        if isinstance(pretrained, str):
-            model_name = pretrained
-        else:
-            # get the HF hub name via accessor on model
-            model_name = self.model.name_or_path
-
-        # Use tokenizer_name if provided, otherwise fall back to model_name
-        target_name = tokenizer_name if tokenizer_name else model_name
-        
-        # Validate that we're not trying to load a custom tokenizer path as HF tokenizer
-        if tokenizer_name and any(pattern in tokenizer_name for pattern in ["tokenmonster/", "tiktoken/"]):
-            raise ValueError(
-                f"Tokenizer '{tokenizer_name}' appears to be a custom tokenizer path, "
-                f"but custom tokenizers are not available. Make sure your custom tokenizer "
-                f"classes are properly installed and imported."
-            )
-        
-        try:
-            self.tokenizer = transformers.AutoTokenizer.from_pretrained(target_name, **kwargs)
-            eval_logger.info(f"Successfully loaded HuggingFace tokenizer: {target_name}")
-        except Exception as e:
-            eval_logger.error(f"Failed to load tokenizer '{target_name}': {e}")
-            raise RuntimeError(f"Could not load tokenizer '{target_name}'. "
-                             f"Please check that the tokenizer path is correct.") from e
-
     def _get_accelerate_args(
         self,
-        parallelize: bool | None = None,
-        device_map: str | None = "auto",
-        max_memory_per_gpu: int | str | None = None,
-        max_cpu_memory: int | str | None = None,
-        offload_folder: str | None = "./offload",
-        gpus: int | None = None,
+        parallelize: Optional[bool] = None,
+        device_map: Optional[str] = "auto",
+        max_memory_per_gpu: Optional[Union[int, str]] = None,
+        max_cpu_memory: Optional[Union[int, str]] = None,
+        offload_folder: Optional[str] = "./offload",
+        gpus: Optional[int] = None,
     ) -> dict:
         """Returns the kwargs needed to apply `accelerate` in `AutoModel.from_pretrained`."""
         num_local_processes = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
@@ -798,8 +591,13 @@ class HFLM(TemplateLM):
                 }
             else:  # Estimating the possible memory requirements
                 max_memory_all_gpus = get_max_memory()
-                max_memory_all_gpus.pop("cpu", None)
-                if hasattr(self, "accelerator"):
+                if "cpu" in max_memory_all_gpus:
+                    del max_memory_all_gpus["cpu"]
+                if not hasattr(self, "accelerator"):
+                    max_memory_per_gpu_map = {
+                        k: v for k, v in max_memory_all_gpus.items()
+                    }
+                else:
                     # use only 1 / num_processes of the GPUs if we are running under accelerate launch
                     max_memory_per_gpu_map = {
                         k: v
@@ -807,9 +605,6 @@ class HFLM(TemplateLM):
                         if k % num_local_processes
                         == (self.accelerator.process_index % num_local_processes)
                     }
-                else:
-                    max_memory_per_gpu_map = max_memory_all_gpus
-
             args["max_memory"] = max_memory_per_gpu_map
             args["device_map"] = "auto" if device_map is None else device_map
             eval_logger.info(
@@ -853,12 +648,12 @@ class HFLM(TemplateLM):
             return self._model
 
     @property
-    def eot_token_id(self) -> int:
+    def eot_token_id(self):
         # we use EOT because end of *text* is more accurate for what we're doing than end of *sentence*
         return self.tokenizer.eos_token_id
 
     @property
-    def prefix_token_id(self) -> int:
+    def prefix_token_id(self):
         # it is used as prefix for loglikelihood
         if self.custom_prefix_token_id is not None:
             return self.custom_prefix_token_id
@@ -867,7 +662,7 @@ class HFLM(TemplateLM):
         return self.tokenizer.eos_token_id
 
     @property
-    def max_length(self) -> int:
+    def max_length(self):
         if self._max_length:  # if max length manually set, return it
             return self._max_length
         seqlen_config_attrs = ("n_positions", "max_position_embeddings", "n_ctx")
@@ -875,7 +670,7 @@ class HFLM(TemplateLM):
             if hasattr(self.model.config, attr):
                 return getattr(self.model.config, attr)
         if hasattr(self.tokenizer, "model_max_length"):
-            if self.tokenizer.model_max_length == TOKENIZER_INFINITY:
+            if self.tokenizer.model_max_length == 1000000000000000019884624838656:
                 return self._DEFAULT_MAX_LENGTH
             return self.tokenizer.model_max_length
         return self._DEFAULT_MAX_LENGTH
@@ -906,12 +701,12 @@ class HFLM(TemplateLM):
 
     def _get_backend(
         self,
-        config: transformers.PretrainedConfig | transformers.AutoConfig,
+        config: Union[transformers.PretrainedConfig, transformers.AutoConfig],
         backend: Literal["default", "causal", "seq2seq"] = "default",
-        trust_remote_code: bool | None = False,
+        trust_remote_code: Optional[bool] = False,
     ) -> None:
-        """Helper method during initialization.
-
+        """
+        Helper method during initialization.
         Determines the backend ("causal" (decoder-only) or "seq2seq" (encoder-decoder)) model type to be used.
         sets `self.AUTO_MODEL_CLASS` appropriately if not already set.
 
@@ -923,7 +718,9 @@ class HFLM(TemplateLM):
 
         if backend != "default":
             # if we've settled on non-default backend, use that manually
-            if backend in ["causal", "seq2seq"]:
+            if backend == "causal":
+                self.backend = backend
+            elif backend == "seq2seq":
                 self.backend = backend
             eval_logger.info(
                 f"Overrode HF model backend type, and using type '{self.backend}'"
@@ -931,7 +728,7 @@ class HFLM(TemplateLM):
         else:
             # determine and use the default HF backend for this model, based on its config + metadata.
             if (
-                getattr(config, "model_type", None)
+                getattr(config, "model_type")
                 in MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING_NAMES
             ):
                 # first check if model type is listed under seq2seq models, since some
@@ -940,7 +737,7 @@ class HFLM(TemplateLM):
                 self.backend = "seq2seq"
                 eval_logger.debug(f"Using model type '{self.backend}'")
             elif (
-                getattr(config, "model_type", None) in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+                getattr(self.config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
             ):
                 self.backend = "causal"
                 eval_logger.debug(f"Using model type '{self.backend}'")
@@ -969,43 +766,41 @@ class HFLM(TemplateLM):
         pretrained: str,
         revision: str = "main",
         trust_remote_code: bool = False,
-        gguf_file: str | None = None,
-        subfolder: str = "",
+        gguf_file: Optional[str] = None,
     ) -> None:
-        """Return the model config for HuggingFace models."""
+        """Return the model config for HuggingFace models"""
         self._config = transformers.AutoConfig.from_pretrained(
             pretrained,
             revision=revision,
             trust_remote_code=trust_remote_code,
             gguf_file=gguf_file,
-            subfolder=subfolder,
         )
 
     def _create_model(
         self,
         pretrained: str,
-        revision: str | None = "main",
-        dtype: str | torch.dtype | None = "auto",
-        trust_remote_code: bool | None = False,
+        revision: Optional[str] = "main",
+        dtype: Optional[Union[str, torch.dtype]] = "auto",
+        trust_remote_code: Optional[bool] = False,
         # arguments used for splitting a model across GPUs naively.
         # only used if `parallelize=True`.
         # (accelerate naive PP (device_map) options)
-        parallelize: bool | None = False,
-        gpus: int | None = None,
-        max_memory_per_gpu: int | str | None = None,
-        max_cpu_memory: int | str | None = None,
-        offload_folder: str | None = "./offload",
+        parallelize: Optional[bool] = False,
+        gpus: Optional[int] = None,
+        max_memory_per_gpu: Optional[Union[int, str]] = None,
+        max_cpu_memory: Optional[Union[int, str]] = None,
+        offload_folder: Optional[str] = "./offload",
         # PEFT, delta weights and quantization options
-        peft: str | None = None,
-        delta: str | None = None,
-        autogptq: bool | str | None = False,
-        gptqmodel: bool | None = False,
-        gguf_file: str | None = None,
-        quantization_config: AutoQuantizationConfig | None = None,
-        subfolder: str = "",
+        peft: Optional[str] = None,
+        delta: Optional[str] = None,
+        autogptq: Optional[Union[bool, str]] = False,
+        gptqmodel: Optional[bool] = False,
+        gguf_file: Optional[str] = None,
+        quantization_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
-        """Initializes an HF or HF-compatible PreTrainedModel from scratch
+        """
+        Initializes an HF or HF-compatible PreTrainedModel from scratch
         inside HFLM, using the kwargs passed into self.__init__().
 
         Also handles functionality such as AutoGPTQ usage and PEFT wrapping.
@@ -1016,12 +811,12 @@ class HFLM(TemplateLM):
         please consider subclassing HFLM and overriding this and other methods as needed.
         """
 
-        model_kwargs = kwargs or {}
+        model_kwargs = kwargs if kwargs else {}
 
         model_kwargs.update(
             self._get_accelerate_args(
                 parallelize=parallelize,
-                device_map=kwargs.get("device_map"),
+                device_map=kwargs.get("device_map", None),
                 max_memory_per_gpu=max_memory_per_gpu,
                 max_cpu_memory=max_cpu_memory,
                 offload_folder=offload_folder,
@@ -1030,12 +825,16 @@ class HFLM(TemplateLM):
         )
 
         if not autogptq and not gptqmodel:
-            if model_kwargs.get("load_in_4bit"):
-                assert vparse(transformers.__version__) >= vparse("4.30.0"), (
+            if model_kwargs.get("load_in_4bit", None):
+                assert transformers.__version__ >= "4.30.0", (
                     "load_in_4bit requires transformers >= 4.30.0"
                 )
-                if compute_dtype := model_kwargs.get("bnb_4bit_compute_dtype"):
-                    model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(compute_dtype)
+            if transformers.__version__ >= "4.30.0":
+                if model_kwargs.get("load_in_4bit", None):
+                    if model_kwargs.get("bnb_4bit_compute_dtype", None):
+                        model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(
+                            model_kwargs["bnb_4bit_compute_dtype"]
+                        )
 
             self._model = self.AUTO_MODEL_CLASS.from_pretrained(
                 pretrained,
@@ -1044,7 +843,6 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 gguf_file=gguf_file,
                 quantization_config=quantization_config,
-                subfolder=subfolder,
                 **model_kwargs,
             )
         else:
@@ -1060,7 +858,7 @@ class HFLM(TemplateLM):
                     raise type(exception)(
                         "Tried to load auto_gptq, but auto-gptq is not installed ",
                         "please install auto-gptq via pip install lm-eval[gptq] or pip install -e .[gptq]",
-                    ) from exception
+                    )
 
                 self._model = AutoGPTQForCausalLM.from_quantized(
                     pretrained,
@@ -1079,7 +877,7 @@ class HFLM(TemplateLM):
                     raise type(exception)(
                         "Tried to load gptqmodel, but gptqmodel is not installed ",
                         "please install gptqmodel via `pip install gptqmodel --no-build-isolation` or `pip install lm-eval[gptqmodel] --no-build-isolation`",
-                    ) from exception
+                    )
 
                 self._model = GPTQModel.from_quantized(
                     pretrained, trust_remote_code=trust_remote_code, **model_kwargs
@@ -1091,26 +889,13 @@ class HFLM(TemplateLM):
             )
 
         if peft:
-            from peft import PeftModel
-            from peft import __version__ as PEFT_VERSION
-
-            if model_kwargs.get("load_in_4bit") and vparse(PEFT_VERSION) < vparse(
-                "0.4.0"
-            ):
-                raise AssertionError("load_in_4bit requires peft >= 0.4.0")
-
-            # Compatible with Gemma3 (multimodal) and old models
-            if hasattr(self._model.config, "text_config") and hasattr(
-                self._model.config.text_config, "vocab_size"
-            ):
-                vocab_size = self._model.config.text_config.vocab_size
-            else:
-                vocab_size = self._model.config.vocab_size
-
-            if vocab_size != len(self.tokenizer):
+            if model_kwargs.get("load_in_4bit", None):
+                if version.parse(PEFT_VERSION) < version.parse("0.4.0"):
+                    raise AssertionError("load_in_4bit requires peft >= 0.4.0")
+            if self._model.config.vocab_size != len(self.tokenizer):
                 # resize model for LoRAs with added tokens
                 eval_logger.info(
-                    f"Model config indicates vocab_size='{vocab_size}', but found tokenizer with vocab size '{len(self.tokenizer)}'. Resizing model embedding layer..."
+                    f"Model config indicates vocab_size='{self._model.config.vocab_size}', but found tokenizer with vocab size '{len(self.tokenizer)}'. Resizing model embedding layer..."
                 )
                 self._model.resize_token_embeddings(len(self.tokenizer))
             self._model = PeftModel.from_pretrained(
@@ -1131,18 +916,87 @@ class HFLM(TemplateLM):
             for name, param in self._model.state_dict().items():
                 try:
                     param.data += _model_delta.state_dict()[name]
-                except KeyError as e:
-                    raise KeyError(
-                        f"Delta model is missing weights for layer: {name}"
-                    ) from e
+                except KeyError:
+                    raise KeyError(f"Delta model is missing weights for layer: {name}")
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to add delta weights to layer {name}. Error: {e}"
-                    ) from e
+                    )
 
             del _model_delta
 
-    def _detect_batch_size(self, requests: Sequence | None = None, pos: int = 0):
+        return None
+
+    def _create_tokenizer(
+        self,
+        pretrained: Union[str, transformers.PreTrainedModel],
+        tokenizer: Optional[
+            Union[
+                str,
+                transformers.PreTrainedTokenizer,
+                transformers.PreTrainedTokenizerFast,
+            ]
+        ],
+        revision: Optional[str] = "main",
+        trust_remote_code: Optional[bool] = False,
+        use_fast_tokenizer: Optional[bool] = True,
+        gguf_file: Optional[str] = None,
+        add_bos_token: Optional[bool] = False,
+    ) -> None:
+        """
+        Helper method during initialization.
+
+        Create a tokenizer object corresponding to the correct
+        tokenizer for value of `pretrained`, or use the pre-initialized tokenizer passed.
+        """
+        if pretrained and "supertoken" in pretrained.lower():
+            if "tokenmonster" in pretrained.lower():
+                self.tokenizer = TokenMonsterTokenizer.load(tokenizer)
+            elif "tiktoken" in pretrained.lower():
+                self.tokenizer = TikTokenTokenizer.load(tokenizer)
+            elif "tekken" in pretrained.lower():
+                self.tokenizer = MistralTokenizer.load(tokenizer)
+            else:
+                self.tokenizer = HFTokenizer.load(tokenizer)
+            return
+
+        kwargs = {
+            "revision": revision,
+            "trust_remote_code": trust_remote_code,
+        }
+
+        # gguf format embeds tokenizer and is not compatible with hf tokenizer `use_fast` param
+        if gguf_file is not None:
+            kwargs["gguf_file"] = gguf_file
+        else:
+            kwargs["use_fast"] = use_fast_tokenizer
+
+        if add_bos_token:
+            kwargs["add_bos_token"] = True
+
+        if tokenizer:
+            if isinstance(tokenizer, str):
+                self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+                    tokenizer, **kwargs
+                )
+            else:
+                assert isinstance(
+                    tokenizer, transformers.PreTrainedTokenizer
+                ) or isinstance(tokenizer, transformers.PreTrainedTokenizerFast)
+                self.tokenizer = tokenizer
+        else:
+            # Get tokenizer based on 'pretrained'
+            if isinstance(pretrained, str):
+                model_name = pretrained
+            else:
+                # get the HF hub name via accessor on model
+                model_name = self.model.name_or_path
+            self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name, **kwargs
+            )
+        return None
+
+    def _detect_batch_size(self, requests=None, pos: int = 0):
         if requests:
             _, context_enc, continuation_enc = requests[pos]
             max_length = len(
@@ -1157,7 +1011,7 @@ class HFLM(TemplateLM):
 
         # if OOM, then halves batch_size and tries again
         @find_executable_batch_size(starting_batch_size=self.max_batch_size)
-        def forward_batch(batch_size: int):
+        def forward_batch(batch_size):
             if self.backend == "seq2seq":
                 length = max(max_context_enc, max_cont_enc)
                 batched_conts = torch.ones(
@@ -1204,11 +1058,8 @@ class HFLM(TemplateLM):
         return batch_size
 
     def tok_encode(
-        self,
-        string: str,
-        left_truncate_len: int | None = None,
-        add_special_tokens: bool | None = None,
-    ) -> list[int]:
+        self, string: str, left_truncate_len=None, add_special_tokens=None
+    ) -> List[int]:
         """ """
         # default for None - empty dict, use predefined tokenizer param
         # used for all models except for CausalLM or predefined value
@@ -1234,11 +1085,11 @@ class HFLM(TemplateLM):
 
     def tok_batch_encode(
         self,
-        strings: list[str],
+        strings: List[str],
         padding_side: str = "left",
-        left_truncate_len: int | None = None,
+        left_truncate_len: int = None,
         truncation: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         # encode a batch of strings. converts to tensors and pads automatically, unlike tok_encode.
         old_padding_side = self.tokenizer.padding_side
         self.tokenizer.padding_side = padding_side
@@ -1257,7 +1108,7 @@ class HFLM(TemplateLM):
         if left_truncate_len:
             original_lengths = encoding["input_ids"].size(1)
             if original_lengths > left_truncate_len:
-                eval_logger.warning(
+                eval_logger.warn(
                     f"Left truncation applied. Original sequence length was {original_lengths}, "
                     f"truncating to last {left_truncate_len} tokens. Some content will be lost.",
                 )
@@ -1269,17 +1120,11 @@ class HFLM(TemplateLM):
 
         return encoding["input_ids"], encoding["attention_mask"]
 
-    def tok_decode(self, tokens: Iterator[list[str]], skip_special_tokens: bool = True):
+    def tok_decode(self, tokens, skip_special_tokens=True):
         return self.tokenizer.decode(tokens, skip_special_tokens=skip_special_tokens)
 
-    def _model_call(
-        self,
-        inps: torch.Tensor,
-        attn_mask: torch.Tensor | None = None,
-        labels: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def _model_call(self, inps, attn_mask=None, labels=None):
         """
-
         :param inps: torch.Tensor
             A torch tensor of shape [batch, (sequence_ctx + sequence_cont)] or of shape
             [batch, sequence_ctx]. the size of sequence may vary from call to call
@@ -1293,40 +1138,27 @@ class HFLM(TemplateLM):
             A torch tensor of shape [batch, sequence, vocab] with the
         logits returned from the model's decoder
         """
-        with (
-            torch.no_grad(),
-            torch.autocast(
-                device_type=self.device.type,
-                dtype=self.mixed_precision_dtype,
-                enabled=self.mixed_precision_dtype is not None,
-            ),
-        ):
+        with torch.no_grad():
             if attn_mask is not None or labels is not None:
                 assert attn_mask is not None and labels is not None
-                assert transformers.AutoModelForSeq2SeqLM == self.AUTO_MODEL_CLASS
+                assert self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM
                 return self.model(
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
+            else:
+                assert self.AUTO_MODEL_CLASS in (
+                    transformers.AutoModelForCausalLM,
+                    transformers.AutoModelForVision2Seq,
+                )
+                return self.model(inps).logits
 
-            assert self.AUTO_MODEL_CLASS in (
-                transformers.AutoModelForCausalLM,
-                transformers.AutoModelForVision2Seq,
-            )
-            return self.model(inps).logits
-
-    def _model_generate(
-        self,
-        context,
-        max_length: int,
-        stop: list[str],
-        **generation_kwargs: dict[str, Any],
-    ) -> torch.Tensor:
+    def _model_generate(self, context, max_length, stop, **generation_kwargs):
         # temperature = 0.0 if not set
         # if do_sample is false and temp==0.0:
         # remove temperature, as do_sample=False takes care of this
         # and we don't want a warning from HF
         generation_kwargs["temperature"] = generation_kwargs.get("temperature", 0.0)
-        do_sample = generation_kwargs.get("do_sample")
+        do_sample = generation_kwargs.get("do_sample", None)
 
         # The temperature has to be a strictly positive float -- if it is 0.0, use greedy decoding strategies
         if generation_kwargs.get("temperature") == 0.0 and do_sample is None:
@@ -1338,25 +1170,17 @@ class HFLM(TemplateLM):
         stopping_criteria = stop_sequences_criteria(
             self.tokenizer, stop, context.shape[1], context.shape[0]
         )
-        with torch.autocast(
-            device_type=self.device.type,
-            dtype=self.mixed_precision_dtype,
-            enabled=self.mixed_precision_dtype is not None,
-        ):
-            return self.model.generate(
-                input_ids=context,
-                max_length=max_length,
-                stopping_criteria=stopping_criteria,
-                pad_token_id=self.tokenizer.pad_token_id,
-                use_cache=True,
-                **generation_kwargs,
-            )
+        return self.model.generate(
+            input_ids=context,
+            max_length=max_length,
+            stopping_criteria=stopping_criteria,
+            pad_token_id=self.tokenizer.pad_token_id,
+            use_cache=True,
+            **generation_kwargs,
+        )
 
     def _select_cont_toks(
-        self,
-        logits: torch.Tensor,
-        contlen: int | None = None,
-        inplen: int | None = None,
+        self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
         if self.backend == "causal":
             assert contlen and inplen, (
@@ -1376,8 +1200,8 @@ class HFLM(TemplateLM):
         return logits
 
     def loglikelihood_rolling(
-        self, requests: list[Instance], disable_tqdm: bool = False
-    ) -> list[float]:
+        self, requests: List[Instance], disable_tqdm: bool = False
+    ) -> List[float]:
         adaptive_batch_size = None
         if self.batch_size == "auto":
             # using rolling window with maximum context
@@ -1396,7 +1220,7 @@ class HFLM(TemplateLM):
                 disable=(disable_tqdm or (self.rank != 0)),
             )
         ):
-            rolling_token_windows: list[tuple[list[int], list[int]]] = list(
+            rolling_token_windows: List[Tuple[List[int], List[int]]] = list(
                 map(
                     utils.make_disjoint_window,
                     utils.get_rolling_token_windows(
@@ -1480,15 +1304,15 @@ class HFLM(TemplateLM):
 
     def _loglikelihood_tokens(
         self,
-        requests: list[tuple[tuple[str, str], list[int], list[int]]],
+        requests: List[Tuple[Tuple[str, str], List[int], List[int]]],
         disable_tqdm: bool = False,
-        override_bs: int | None = None,
-    ) -> list[tuple[float, bool]]:
+        override_bs: int = None,
+    ) -> List[Tuple[float, bool]]:
         # TODO: implement some kind of efficient-request-middleware that lumps together requests with the same context
         res = []
 
-        def _collate(req: tuple[tuple[str, str], list[int], list[int]]):
-            """Defines the key for the sorted method."""
+        def _collate(req: Tuple[Tuple[str, str], List[int], List[int]]):
+            """Defines the key for the sorted method"""
             # the negative sign on len(toks) sorts descending - this has a few advantages:
             # - time estimates will always be over not underestimates, which is more useful for planning
             # - to know the size of a batch when going through the list, you know the first one is always the batch
@@ -1499,8 +1323,8 @@ class HFLM(TemplateLM):
             toks = req[1] + req[2]
             return -len(toks), tuple(toks)
 
-        def _lookup_one_token_cont(req: tuple[tuple[str, str], list[int], list[int]]):
-            """Defines the key to group and lookup one-token continuations."""
+        def _lookup_one_token_cont(req: Tuple[Tuple[str, str], List[int], List[int]]):
+            """Defines the key to group and lookup one-token continuations"""
             # Use with group_by="contexts" (optional)"
             # allows for the creation of a lookup, so we can reuse logits in case of one-token continuations.
             # speeds up some multiple-choice tasks proportionally to the number of choices.
@@ -1673,7 +1497,7 @@ class HFLM(TemplateLM):
                 # original args. Otherwise, expands the logits batch dimension and yields each
                 # batch along with matching continuation tokens and prompt strings.
                 # logits -> [1, seq, vocab]
-                for request_str, cont_toks, logits in re_ord.get_cache(  # noqa
+                for request_str, cont_toks, logits in re_ord.get_cache(
                     req_str=request_str,
                     cxt_toks=ctx_tokens,
                     cont_toks=cont_toks,
@@ -1714,11 +1538,11 @@ class HFLM(TemplateLM):
         return re_ord.get_original(res)
 
     def generate_until(
-        self, requests: list[Instance], disable_tqdm: bool = False
-    ) -> list[str]:
+        self, requests: List[Instance], disable_tqdm: bool = False
+    ) -> List[str]:
         res = []
 
-        def _collate(req: tuple[str, dict]):
+        def _collate(req: Tuple[str, dict]):
             """Defines the key for the sorted method"""
             # the negative sign on len(toks) sorts descending - this has a few advantages:
             # - time estimates will always be over not underestimates, which is more useful for planning
@@ -1778,10 +1602,10 @@ class HFLM(TemplateLM):
                 # add EOS token to stop sequences
                 until = handle_stop_sequences(kwargs.pop("until", None), eos=eos)
             else:
-                raise TypeError(
+                raise ValueError(
                     f"Expected `kwargs` to be of type `dict` but got {type(gen_kwargs)}"
                 )
-            if "max_gen_toks" in kwargs:
+            if "max_gen_toks" in kwargs.keys():
                 max_gen_toks = kwargs.pop("max_gen_toks")
             else:
                 max_gen_toks = self.max_gen_toks
@@ -1823,30 +1647,15 @@ class HFLM(TemplateLM):
                 if self.backend == "causal":
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
-                # Handle integer think_end_token: find last occurrence and strip tokens after it
-                if isinstance(self.think_end_token, int):
-                    think_token_indices = [
-                        i
-                        for i, token in enumerate(cont_toks)
-                        if token == self.think_end_token
-                    ]
-                    if think_token_indices:
-                        cont_toks = cont_toks[think_token_indices[-1] + 1 :]
-
                 s = self.tok_decode(cont_toks)
 
-                # Strip leading whitespace if we removed thinking tokens
-                if isinstance(self.think_end_token, int):
-                    s = s.lstrip()
+                # use secondary stop seqs to cut off should-have-been-stopped content post-hoc
+                for term in until:
+                    if len(term) > 0:
+                        # ignore '' separator,
+                        # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
+                        s = s.split(term)[0]
 
-                # Apply post-processing: remove stop sequences and string-based thinking tokens
-                s = postprocess_generated_text(
-                    generation=s,
-                    stop=until,
-                    think_end_token=self.think_end_token
-                    if isinstance(self.think_end_token, str)
-                    else None,
-                )
                 res.append(s)
 
                 self.cache_hook.add_partial("generate_until", (context, gen_kwargs), s)
@@ -1859,16 +1668,17 @@ class HFLM(TemplateLM):
         return res
 
     def apply_chat_template(
-        self, chat_history: list[dict[str, str]], add_generation_prompt: bool = True
+        self, chat_history: List[Dict[str, str]], add_generation_prompt: bool = True
     ) -> str:
-        """Method to apply a chat template to a list of chat history between user and model."""
+        """
+        Method to apply a chat template to a list of chat history between user and model.
+        """
         try:
             chat_templated = self.tokenizer.apply_chat_template(
                 chat_history,
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
                 continue_final_message=not add_generation_prompt,
-                **self.chat_template_args,
             )
         except jinja2.exceptions.TemplateError:
             eval_logger.warning(
@@ -1880,13 +1690,14 @@ class HFLM(TemplateLM):
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
                 continue_final_message=not add_generation_prompt,
-                **self.chat_template_args,
             )
 
         return chat_templated
 
     def get_model_info(self) -> dict:
-        """Method to get Hugging Face model information for experiment reproducibility."""
+        """
+        Method to get Hugging Face model information for experiment reproducibility.
+        """
 
         def get_model_num_params(model) -> int:
             if hasattr(model, "num_parameters"):

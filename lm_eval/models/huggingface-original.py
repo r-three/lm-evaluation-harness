@@ -41,12 +41,6 @@ from lm_eval.models.utils import (
     stop_sequences_criteria,
 )
 
-# Import your custom tokenizer classes - adjust the import path as needed
-try:
-    from lm_eval.models.tokenizers_module import Tokenizer, TikTokenTokenizer, TokenMonsterTokenizer, MistralTokenizer
-    CUSTOM_TOKENIZERS_AVAILABLE = True
-except ImportError:
-    CUSTOM_TOKENIZERS_AVAILABLE = False
 
 if TYPE_CHECKING:
     from transformers.quantizers.auto import AutoQuantizationConfig
@@ -55,9 +49,6 @@ if TYPE_CHECKING:
 
 eval_logger = logging.getLogger(__name__)
 TOKENIZER_INFINITY = 1000000000000000019884624838656
-
-if not CUSTOM_TOKENIZERS_AVAILABLE:
-    eval_logger.warning("Custom tokenizers not available. Only HuggingFace tokenizers will be supported.")
 
 
 @register_model("hf-auto", "hf", "huggingface")
@@ -343,415 +334,6 @@ class HFLM(TemplateLM):
             eval_logger.info(
                 f"Loglikelihood prefix token id used in evaluation: {self.prefix_token_id}"
             )
-
-    def _should_use_custom_tokenizer(self, tokenizer_name: str) -> bool:
-        """Determine if we should use a custom tokenizer based on tokenizer name."""
-        
-        if not CUSTOM_TOKENIZERS_AVAILABLE:
-            return False
-            
-        # Check for explicit custom tokenizer specifications from your TOKENIZER_NAMES
-        custom_tokenizers = {
-            "tokenmonster/english-32000-balanced-v1",
-            "tiktoken/gpt-4",
-            "tiktoken/gpt-4o", 
-            "mistralai/tekken"
-        }
-        
-        return tokenizer_name in custom_tokenizers
-
-    def _wrap_custom_tokenizer(self, custom_tokenizer) -> object:
-        """Create a wrapper that makes custom tokenizers compatible with HF interface."""
-        
-        class CustomTokenizerWrapper:
-            def __init__(self, custom_tok):
-                self.custom_tokenizer = custom_tok
-                self._vocab_size = custom_tok.get_vocab_size()
-                # Set some required attributes for HF compatibility
-                self.name_or_path = custom_tok.name
-                self.padding_side = "left"  # Default padding side
-                
-                # Build token-to-ID mapping for TokenMonster
-                self._build_token_mappings()
-                
-                # Setup special tokens based on tokenizer type
-                self._setup_special_tokens()
-                
-            def _build_token_mappings(self):
-                """Build token-to-ID and ID-to-token mappings."""
-                self.token_to_id_map = {}
-                self.id_to_token_map = {}
-                
-                # Build mappings for all tokenizers
-                for i in range(self._vocab_size):
-                    try:
-                        token = self.custom_tokenizer.get_token(i)
-                        self.id_to_token_map[i] = token
-                        self.token_to_id_map[token] = i
-                    except:
-                        continue
-                        
-            def _setup_special_tokens(self):
-                """Setup special token IDs based on tokenizer type."""
-                # Default values
-                self.eos_token_id = None
-                self.bos_token_id = None
-                self.pad_token_id = None
-                
-                if isinstance(self.custom_tokenizer, TikTokenTokenizer):
-                    # GPT-4 and GPT-4o tiktoken tokenizers
-                    if "gpt-4" in self.custom_tokenizer.name.lower():
-                        # Try to find the actual <|endoftext|> token
-                        try:
-                            # For tiktoken, try to encode the special token to get its ID
-                            eot_ids = self.custom_tokenizer.tokenizer.encode("<|endoftext|>")
-                            if eot_ids:
-                                self.eos_token_id = eot_ids[0]
-                            else:
-                                self.eos_token_id = 100257  # Fallback
-                        except:
-                            self.eos_token_id = 100257  # Standard GPT-4 endoftext token
-                        self.pad_token_id = self.eos_token_id
-                    else:
-                        # Generic tiktoken handling
-                        vocab_size = self.custom_tokenizer.get_vocab_size()
-                        self.eos_token_id = vocab_size - 1
-                        self.pad_token_id = self.eos_token_id
-                    
-                elif isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                    # TokenMonster - try to find appropriate special tokens
-                    vocab_size = self.custom_tokenizer.get_vocab_size()
-                    
-                    # Look for common special tokens
-                    special_candidates = ["<|endoftext|>", "</s>", "<eos>", "<end>"]
-                    for candidate in special_candidates:
-                        if candidate in self.token_to_id_map:
-                            self.eos_token_id = self.token_to_id_map[candidate]
-                            break
-                    
-                    if self.eos_token_id is None:
-                        self.eos_token_id = vocab_size - 1  # Last token as fallback
-                    
-                    # Pad token - look for padding candidates
-                    pad_candidates = ["<pad>", "<|pad|>", ""]
-                    for candidate in pad_candidates:
-                        if candidate in self.token_to_id_map:
-                            self.pad_token_id = self.token_to_id_map[candidate]
-                            break
-                    
-                    if self.pad_token_id is None:
-                        self.pad_token_id = 0  # First token as fallback
-                    
-                elif isinstance(self.custom_tokenizer, MistralTokenizer):
-                    # Mistral tekken tokenizer
-                    if hasattr(self.custom_tokenizer.tokenizer, 'bos_id'):
-                        self.bos_token_id = self.custom_tokenizer.tokenizer.bos_id
-                    if hasattr(self.custom_tokenizer.tokenizer, 'eos_id'):
-                        self.eos_token_id = self.custom_tokenizer.tokenizer.eos_id
-                    
-                    # For tekken, try to get proper special tokens
-                    if self.eos_token_id is None:
-                        vocab_size = self.custom_tokenizer.get_vocab_size()
-                        self.eos_token_id = vocab_size - 1
-                    
-                    # Use EOS as pad if no dedicated pad token
-                    self.pad_token_id = self.eos_token_id if self.eos_token_id else 0
-            
-            @property
-            def vocab_size(self):
-                return self._vocab_size
-            
-            @property 
-            def pad_token(self):
-                """Return pad token string if available."""
-                if self.pad_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.pad_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def eos_token(self):
-                """Return EOS token string if available."""
-                if self.eos_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.eos_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def bos_token(self):
-                """Return BOS token string if available.""" 
-                if self.bos_token_id is not None:
-                    try:
-                        return self.custom_tokenizer.get_token(self.bos_token_id)
-                    except:
-                        return None
-                return None
-            
-            @property
-            def model_max_length(self):
-                """Return a reasonable max length."""
-                return 4096  # Default reasonable length
-                
-            def get_vocab(self):
-                """Return vocabulary mapping."""
-                return self.token_to_id_map
-                
-            def encode(self, text, add_special_tokens=True, **kwargs):
-                """Encode text to token IDs."""
-                # Handle different tokenizer return types
-                if isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                     token_ids = [int(t) for t in self.custom_tokenizer.tokenize(text)]
-                else:
-                    # TikToken and Mistral return token IDs directly
-                    token_ids = self.custom_tokenizer.tokenize(text)
-                
-                # Handle add_special_tokens if needed
-                if add_special_tokens and self.bos_token_id is not None:
-                    token_ids = [self.bos_token_id] + token_ids
-                    
-                return token_ids
-                
-            def decode(self, token_ids, skip_special_tokens=True, **kwargs):
-                """Decode token IDs to text."""
-                if hasattr(token_ids, 'tolist'):  # Handle torch tensors
-                    token_ids = token_ids.tolist()
-                    
-                # Filter special tokens if requested
-                if skip_special_tokens:
-                    special_tokens = {self.eos_token_id, self.bos_token_id, self.pad_token_id}
-                    special_tokens = {t for t in special_tokens if t is not None}
-                    token_ids = [tid for tid in token_ids if tid not in special_tokens]
-                
-                # Convert token IDs back to text
-                try:
-                    if isinstance(self.custom_tokenizer, TikTokenTokenizer):
-                        # TikToken can decode directly from IDs
-                        try:
-                            return self.custom_tokenizer.tokenizer.decode(token_ids)
-                        except:
-                            # Fallback to token-by-token
-                            tokens = [self.custom_tokenizer.get_token(tid) for tid in token_ids if tid < self._vocab_size]
-                            return ''.join(tokens)
-                    
-                    elif isinstance(self.custom_tokenizer, TokenMonsterTokenizer):
-                        # TokenMonster: convert IDs to tokens then join
-                        tokens = []
-                        for tid in token_ids:
-                            if tid < self._vocab_size and tid in self.id_to_token_map:
-                                token = self.id_to_token_map[tid]
-                                tokens.append(token)
-                        
-                        # TokenMonster tokens should join directly
-                        return ''.join(tokens)
-                    
-                    elif isinstance(self.custom_tokenizer, MistralTokenizer):
-                        # Mistral/Tekken: handle piece-based tokens
-                        tokens = []
-                        for tid in token_ids:
-                            if tid < self._vocab_size:
-                                token = self.custom_tokenizer.get_token(tid)
-                                tokens.append(token)
-                        
-                        # Join and handle space markers (▁ -> space)
-                        text = ''.join(tokens)
-                        # Replace sentencepiece space marker with actual spaces
-                        text = text.replace('▁', ' ')
-                        return text.strip()  # Remove leading/trailing spaces
-                    
-                    else:
-                        # Generic fallback
-                        tokens = [self.custom_tokenizer.get_token(tid) for tid in token_ids if tid < self._vocab_size]
-                        return ''.join(tokens)
-                        
-                except Exception as e:
-                    eval_logger.warning(f"Failed to decode tokens {token_ids[:10]}...: {e}")
-                    return ""
-            
-            def __call__(self, text, padding=False, truncation=False, max_length=None, 
-                        return_tensors=None, add_special_tokens=True, **kwargs):
-                """Callable interface for batch processing."""
-                if isinstance(text, str):
-                    texts = [text]
-                    single_input = True
-                else:
-                    texts = text
-                    single_input = False
-                    
-                # Encode all texts
-                all_token_ids = []
-                for t in texts:
-                    token_ids = self.encode(t, add_special_tokens=add_special_tokens)
-                    
-                    # Handle truncation
-                    if truncation and max_length and len(token_ids) > max_length:
-                        token_ids = token_ids[:max_length]
-                        
-                    all_token_ids.append(token_ids)
-                
-                # Handle padding
-                if padding and len(all_token_ids) > 1:
-                    max_len = max(len(ids) for ids in all_token_ids)
-                    if max_length:
-                        max_len = min(max_len, max_length)
-                        
-                    pad_id = self.pad_token_id if self.pad_token_id is not None else 0
-                    
-                    for i, token_ids in enumerate(all_token_ids):
-                        if len(token_ids) < max_len:
-                            if self.padding_side == "left":
-                                all_token_ids[i] = [pad_id] * (max_len - len(token_ids)) + token_ids
-                            else:
-                                all_token_ids[i] = token_ids + [pad_id] * (max_len - len(token_ids))
-                
-                # Create attention masks
-                attention_masks = []
-                pad_id = self.pad_token_id if self.pad_token_id is not None else 0
-                for token_ids in all_token_ids:
-                    mask = [1 if tid != pad_id else 0 for tid in token_ids]
-                    attention_masks.append(mask)
-                
-                result = {
-                    "input_ids": all_token_ids[0] if single_input else all_token_ids,
-                    "attention_mask": attention_masks[0] if single_input else attention_masks
-                }
-                
-                # Convert to tensors if requested
-                if return_tensors == "pt":
-                    if single_input:
-                        result["input_ids"] = torch.tensor([result["input_ids"]])
-                        result["attention_mask"] = torch.tensor([result["attention_mask"]])
-                    else:
-                        result["input_ids"] = torch.tensor(result["input_ids"])
-                        result["attention_mask"] = torch.tensor(result["attention_mask"])
-                
-                return result
-            
-            def _validate_encoding(self, test_text="Hello, world!"):
-                """Validate that encoding->decoding preserves the original text."""
-                try:
-                    token_ids = self.encode(test_text, add_special_tokens=False)
-                    decoded_text = self.decode(token_ids, skip_special_tokens=True)
-                    
-                    if decoded_text == test_text:
-                        eval_logger.info(f"Tokenizer validation passed for '{test_text}'")
-                        return True
-                    else:
-                        eval_logger.warning(
-                            f"Tokenizer validation failed:\n"
-                            f"  Original: '{test_text}'\n"
-                            f"  Decoded:  '{decoded_text}'\n"
-                            f"  Token IDs: {token_ids}"
-                        )
-                        return False
-                except Exception as e:
-                    eval_logger.error(f"Tokenizer validation error: {e}")
-                    return False
-                
-        wrapper = CustomTokenizerWrapper(custom_tokenizer)
-        
-        # Validate the tokenizer works correctly
-        wrapper._validate_encoding()
-        
-        return wrapper
-
-    def _create_tokenizer(
-        self,
-        pretrained: str | transformers.PreTrainedModel,
-        tokenizer: str
-        | transformers.PreTrainedTokenizer
-        | transformers.PreTrainedTokenizerFast
-        | None,
-        revision: str | None = "main",
-        trust_remote_code: bool | None = False,
-        use_fast_tokenizer: bool | None = True,
-        gguf_file: str | None = None,
-        add_bos_token: bool | None = False,
-        subfolder: str | None = "",
-    ) -> None:
-        """Helper method during initialization.
-
-        Create a tokenizer object corresponding to the correct
-        tokenizer for value of `pretrained`, or use the pre-initialized tokenizer passed.
-        Supports custom tokenizers: TokenMonster, TikToken, and Tekken.
-        """
-        
-        # If a tokenizer object is already provided, use it directly
-        if tokenizer and not isinstance(tokenizer, str):
-            assert isinstance(
-                tokenizer,
-                (
-                    transformers.PreTrainedTokenizer,
-                    transformers.PreTrainedTokenizerFast,
-                ),
-            )
-            self.tokenizer = tokenizer
-            return
-
-        # Determine tokenizer name - use explicit tokenizer if provided
-        tokenizer_name = tokenizer if isinstance(tokenizer, str) else None
-        
-        # Check if we should use a custom tokenizer based on tokenizer name
-        if tokenizer_name and self._should_use_custom_tokenizer(tokenizer_name):
-            try:
-                # Load custom tokenizer using your Tokenizer.load method
-                custom_tokenizer = Tokenizer.load(tokenizer_name)
-                
-                # Create a wrapper that implements the HF tokenizer interface
-                self.tokenizer = self._wrap_custom_tokenizer(custom_tokenizer)
-                eval_logger.info(f"Successfully loaded custom tokenizer: {tokenizer_name}")
-                return
-            except Exception as e:
-                eval_logger.error(f"Failed to load custom tokenizer '{tokenizer_name}': {e}")
-                raise RuntimeError(f"Custom tokenizer '{tokenizer_name}' could not be loaded. "
-                                 f"Make sure your custom tokenizer classes are properly installed and imported.") from e
-
-        # Fall back to standard HF tokenizer loading
-        kwargs = {
-            "revision": revision,
-            "trust_remote_code": trust_remote_code,
-        }
-
-        # gguf format embeds tokenizer and is not compatible with hf tokenizer `use_fast` param
-        if not tokenizer and gguf_file is not None:
-            kwargs["gguf_file"] = gguf_file
-        else:
-            kwargs["use_fast"] = use_fast_tokenizer
-
-        if add_bos_token:
-            kwargs["add_bos_token"] = True
-
-        if subfolder:
-            kwargs["subfolder"] = subfolder
-
-        # Get tokenizer based on 'pretrained' or explicit tokenizer name
-        if isinstance(pretrained, str):
-            model_name = pretrained
-        else:
-            # get the HF hub name via accessor on model
-            model_name = self.model.name_or_path
-
-        # Use tokenizer_name if provided, otherwise fall back to model_name
-        target_name = tokenizer_name if tokenizer_name else model_name
-        
-        # Validate that we're not trying to load a custom tokenizer path as HF tokenizer
-        if tokenizer_name and any(pattern in tokenizer_name for pattern in ["tokenmonster/", "tiktoken/"]):
-            raise ValueError(
-                f"Tokenizer '{tokenizer_name}' appears to be a custom tokenizer path, "
-                f"but custom tokenizers are not available. Make sure your custom tokenizer "
-                f"classes are properly installed and imported."
-            )
-        
-        try:
-            self.tokenizer = transformers.AutoTokenizer.from_pretrained(target_name, **kwargs)
-            eval_logger.info(f"Successfully loaded HuggingFace tokenizer: {target_name}")
-        except Exception as e:
-            eval_logger.error(f"Failed to load tokenizer '{target_name}': {e}")
-            raise RuntimeError(f"Could not load tokenizer '{target_name}'. "
-                             f"Please check that the tokenizer path is correct.") from e
 
     def _get_accelerate_args(
         self,
@@ -1141,6 +723,67 @@ class HFLM(TemplateLM):
                     ) from e
 
             del _model_delta
+
+    def _create_tokenizer(
+        self,
+        pretrained: str | transformers.PreTrainedModel,
+        tokenizer: str
+        | transformers.PreTrainedTokenizer
+        | transformers.PreTrainedTokenizerFast
+        | None,
+        revision: str | None = "main",
+        trust_remote_code: bool | None = False,
+        use_fast_tokenizer: bool | None = True,
+        gguf_file: str | None = None,
+        add_bos_token: bool | None = False,
+        subfolder: str | None = "",
+    ) -> None:
+        """Helper method during initialization.
+
+        Create a tokenizer object corresponding to the correct
+        tokenizer for value of `pretrained`, or use the pre-initialized tokenizer passed.
+        """
+        kwargs = {
+            "revision": revision,
+            "trust_remote_code": trust_remote_code,
+        }
+
+        # gguf format embeds tokenizer and is not compatible with hf tokenizer `use_fast` param
+        if not tokenizer and gguf_file is not None:
+            kwargs["gguf_file"] = gguf_file
+        else:
+            kwargs["use_fast"] = use_fast_tokenizer
+
+        if add_bos_token:
+            kwargs["add_bos_token"] = True
+
+        if subfolder:
+            kwargs["subfolder"] = subfolder
+
+        if tokenizer:
+            if isinstance(tokenizer, str):
+                self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+                    tokenizer, **kwargs
+                )
+            else:
+                assert isinstance(
+                    tokenizer,
+                    (
+                        transformers.PreTrainedTokenizer,
+                        transformers.PreTrainedTokenizerFast,
+                    ),
+                )
+                self.tokenizer = tokenizer
+        else:
+            # Get tokenizer based on 'pretrained'
+            if isinstance(pretrained, str):
+                model_name = pretrained
+            else:
+                # get the HF hub name via accessor on model
+                model_name = self.model.name_or_path
+            self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+                model_name, **kwargs
+            )
 
     def _detect_batch_size(self, requests: Sequence | None = None, pos: int = 0):
         if requests:
