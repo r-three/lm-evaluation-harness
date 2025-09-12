@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_completion_stem_letter_repetition
+include: tokenizer_robustness_completion_stem_base.yaml
+task: tokenizer_robustness_completion_stem_letter_repetition

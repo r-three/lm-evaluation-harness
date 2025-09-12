@@ -10,14 +10,11 @@ metadata:
   description: Tokenization robustness evaluation dataset
   version: 1.0.2
 task:
-- tokenizer_robustness_completion_math_italian
 - tokenizer_robustness_completion_math_decorative_unicode
+- tokenizer_robustness_completion_math_italian
+- tokenizer_robustness_completion_math_chinese
+- tokenizer_robustness_completion_math_latex
+- tokenizer_robustness_completion_math_spelled_out
+- tokenizer_robustness_completion_math_cannonical
 - tokenizer_robustness_completion_math_farsi
 - tokenizer_robustness_completion_math_turkish
-- tokenizer_robustness_completion_math_numerical_formats
-- tokenizer_robustness_completion_math_additional_spaces
-- tokenizer_robustness_completion_math_cannonical
-- tokenizer_robustness_completion_math_latex
-- tokenizer_robustness_completion_math_equivalent_expressions
-- tokenizer_robustness_completion_math_spelled_out
-- tokenizer_robustness_completion_math_chinese

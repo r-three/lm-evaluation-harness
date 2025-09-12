@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_completion_chinese_romanization
+include: tokenizer_robustness_completion_chinese_base.yaml
+task: tokenizer_robustness_completion_chinese_romanization

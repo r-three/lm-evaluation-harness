@@ -1,3 +1,3 @@
-dataset_name: latex
+dataset_name: tokenizer_robustness_completion_math_latex
 include: tokenizer_robustness_completion_math_base.yaml
 task: tokenizer_robustness_completion_math_latex
