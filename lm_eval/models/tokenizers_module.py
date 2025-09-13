@@ -1,22 +1,21 @@
-import sys
-import os
-import collections
-import functools
-import operator as op
-import json
-import re
 import argparse
-
-import enum
 import collections
+import enum
+import functools
+import json
 import logging
-import tokenizers
-from typing import Dict, Generator, List, Optional, Tuple, Union
-from typing_extensions import TypeAlias
+import operator as op
+import os
 import random
+import re
+import sys
+from typing import Dict, Generator, List, Optional, Tuple, Union
+
+import numpy as np
+import tokenizers
 import transformers
 from transformers import AutoTokenizer
-import numpy as np
+from typing_extensions import TypeAlias
 
 
 Vocab = dict[str, list[int]]
@@ -27,12 +26,12 @@ random.seed(42)  # Set the seed to a fixed value
 
 ALIGNED_BOS = "~SPECIAL~ALIGNED~BOS~SYMBOL~"
 
-TOKENIZER_NAMES =  {
+TOKENIZER_NAMES = {
     "BERT multilingual base model (cased)": "google-bert/bert-base-multilingual-cased",
     "BERT base model (uncased)": "google-bert/bert-base-uncased",
     "T5": "google-t5/t5-base",
     "mT5": "google/mt5-base",
-    "XGLM-564M" : "facebook/xglm-564M",
+    "XGLM-564M": "facebook/xglm-564M",
     "Gemma 2": "google/gemma-2-2b",
     "Phi-3-Mini-4K-Instruct": "microsoft/Phi-3-mini-4k-instruct",
     "Mistral v3": "mistralai/Mistral-7B-Instruct-v0.3",
@@ -42,20 +41,20 @@ TOKENIZER_NAMES =  {
     "GPT-2": "gpt2",
     "GPT-4 Tiktoken": "tiktoken/gpt-4",
     "GPT-4o Tiktoken": "tiktoken/gpt-4o",
-    "Mistral v3 (tekken)": "mistralai/tekken", #Use this link to call it: https://docs.mistral.ai/guides/tokenization/
-    "Llama-3.2 1B " : "meta-llama/Llama-3.2-1B",
+    "Mistral v3 (tekken)": "mistralai/tekken",  # Use this link to call it: https://docs.mistral.ai/guides/tokenization/
+    "Llama-3.2 1B ": "meta-llama/Llama-3.2-1B",
     "Qwen3-8B": "Qwen/Qwen3-8B",
     "Aya Expanse 8B": "CohereLabs/aya-expanse-8b",
     "Common Pile v1.0": "common-pile/comma-v0.1",
 }
 
-TOKENIZER_TYPES =  {
+TOKENIZER_TYPES = {
     "BERT multilingual base model (cased)": "WordPiece",
     "BERT base model (uncased)": "WordPiece",
     "T5": "SentencePiece_Unigram",
     "mT5": "SentencePiece_Unigram",
-    "XGLM-564M" : "SentencePiece_Unigram",
-    "Gemma 2": "BPE", # BPE in HF but Originally SentencePiece_Unigram
+    "XGLM-564M": "SentencePiece_Unigram",
+    "Gemma 2": "BPE",  # BPE in HF but Originally SentencePiece_Unigram
     "Phi-3-Mini-4K-Instruct": "SentencePiece_BPE",
     "Mistral v3": "SentencePiece_BPE",
     "TokenMonster": "",
@@ -64,41 +63,43 @@ TOKENIZER_TYPES =  {
     "GPT-2": "BPE",
     "GPT-4 Tiktoken": "BPE",
     "GPT-4o Tiktoken": "BPE",
-    "Mistral v3 (tekken)": "BPE", #Use this link to call it: https://docs.mistral.ai/guides/tokenization/
-    "Llama-3.2 1B " : "BPE",
+    "Mistral v3 (tekken)": "BPE",  # Use this link to call it: https://docs.mistral.ai/guides/tokenization/
+    "Llama-3.2 1B ": "BPE",
     "Qwen3-8B": "BPE",
     "Aya Expanse 8B": "SentencePiece",
     "Common Pile v1.0": "BPE",
 }
 
-TOKENIZER_N_SPECIAL_TOKENS_PER_WORD =  {
-    "BERT multilingual base model (cased)": 2, # Example: ['[CLS]', 'Families', '[SEP]']
-    "BERT base model (uncased)": 2, # Example: ['[CLS]', 'families', '[SEP]']
-    "T5": 1, # Example: ['▁Familie', 's', '</s>']
-    "mT5": 1, # Example: ['▁Familie', 's', '</s>']
-    "XGLM-564M" : 1, # Example: ['▁Familie', 's', '</s>']
-    "Gemma 2": 1, # Example: ['<bos>', 'Families']
-    "Phi-3-Mini-4K-Instruct": 0, # Example: ['▁Famil', 'ies']
-    "Mistral v3": 1, # Example: ['<s>', '▁Famil', 'ies']
-    "TokenMonster": 0, # Example: [np.uint16(586), np.uint16(17496)]
-    "ByT5 - Small": 1, # Example: [73, 100, 112, 108, 111, 108, 104, 118, 1]
-    "BLOOM": 0, # Example: ['Famil', 'ies']
-    "GPT-2": 0, # Example: ['F', 'am', 'ilies']
-    "GPT-4 Tiktoken": 0, # Example: [37, 60004]
-    "GPT-4o Tiktoken": 0, # Example: [139342]
-    "Mistral v3 (tekken)": 0, # Example: [109925, 1564]
-    "Llama-3.2 1B " : 1, # Example: ['<|begin_of_text|>', 'F', 'amilies']
-    "Qwen3-8B": 0, # Example: ['F', 'amilies']
-    "Aya Expanse 8B": 1, # Example: ['<BOS_TOKEN>', 'Families']
-    "Common Pile v1.0": 0, # Example: ['F', 'amil', 'ies']
+TOKENIZER_N_SPECIAL_TOKENS_PER_WORD = {
+    "BERT multilingual base model (cased)": 2,  # Example: ['[CLS]', 'Families', '[SEP]']
+    "BERT base model (uncased)": 2,  # Example: ['[CLS]', 'families', '[SEP]']
+    "T5": 1,  # Example: ['▁Familie', 's', '</s>']
+    "mT5": 1,  # Example: ['▁Familie', 's', '</s>']
+    "XGLM-564M": 1,  # Example: ['▁Familie', 's', '</s>']
+    "Gemma 2": 1,  # Example: ['<bos>', 'Families']
+    "Phi-3-Mini-4K-Instruct": 0,  # Example: ['▁Famil', 'ies']
+    "Mistral v3": 1,  # Example: ['<s>', '▁Famil', 'ies']
+    "TokenMonster": 0,  # Example: [np.uint16(586), np.uint16(17496)]
+    "ByT5 - Small": 1,  # Example: [73, 100, 112, 108, 111, 108, 104, 118, 1]
+    "BLOOM": 0,  # Example: ['Famil', 'ies']
+    "GPT-2": 0,  # Example: ['F', 'am', 'ilies']
+    "GPT-4 Tiktoken": 0,  # Example: [37, 60004]
+    "GPT-4o Tiktoken": 0,  # Example: [139342]
+    "Mistral v3 (tekken)": 0,  # Example: [109925, 1564]
+    "Llama-3.2 1B ": 1,  # Example: ['<|begin_of_text|>', 'F', 'amilies']
+    "Qwen3-8B": 0,  # Example: ['F', 'amilies']
+    "Aya Expanse 8B": 1,  # Example: ['<BOS_TOKEN>', 'Families']
+    "Common Pile v1.0": 0,  # Example: ['F', 'amil', 'ies']
 }
 
-LANGUAGE_KEYS = {'sentence_eng_Latn': "eng_Latn", #english
-                 'sentence_zho_Hans': "zho_Hani", #chinese
-                 'sentence_tur_Latn': "tur_Latn", #turkish
-                 'sentence_pes_Arab': "fas_Arab", #persian
-                 'sentence_ita_Latn': "ita_Latn", #Italian
-                 }
+LANGUAGE_KEYS = {
+    "sentence_eng_Latn": "eng_Latn",  # english
+    "sentence_zho_Hans": "zho_Hani",  # chinese
+    "sentence_tur_Latn": "tur_Latn",  # turkish
+    "sentence_pes_Arab": "fas_Arab",  # persian
+    "sentence_ita_Latn": "ita_Latn",  # Italian
+}
+
 
 def hf_load_tokenizer(model_name: str) -> AutoTokenizer:
     """Load a tokenizer for the specified model.
@@ -109,6 +110,7 @@ def hf_load_tokenizer(model_name: str) -> AutoTokenizer:
 
     model_path = model_name
     return AutoTokenizer.from_pretrained(model_path, **kwargs)
+
 
 def bytes_to_unicode():
     """
@@ -139,6 +141,7 @@ def bytes_to_unicode():
 BYTES_TO_UNICODE = bytes_to_unicode()
 UNICODE_TO_BYTES = {v: k for k, v in BYTES_TO_UNICODE.items()}
 
+
 def real_unicode(word: str) -> str:
     bytes_word = []
     for c in word:
@@ -161,7 +164,8 @@ def to_bytes(s: bytes | str | int) -> bytes:
 def join_vocabs(vocabs: dict[str, Vocab]) -> Vocab:
     joint = functools.reduce(op.or_, [v.keys() for v in vocabs.values()])
     return {s: i for i, s in enumerate(sorted(joint, key=to_bytes))}
-    
+
+
 class Tokenizer:
     """Tokenizer wrapper that unifies interface."""
 
@@ -175,7 +179,7 @@ class Tokenizer:
 
     def get_vocab_size(self):
         return self.tokenizer.get_vocab_size()
-    
+
     def get_vocab(self):
         raise NotImplementedError
 
@@ -184,10 +188,10 @@ class Tokenizer:
 
     def get_bos_str(self):
         raise NotImplementedError
-    
+
     def info(self):
         raise NotImplementedError
-    
+
     def tokenize(self, input_text):
         raise NotImplementedError
 
@@ -201,22 +205,20 @@ class Tokenizer:
             return MistralTokenizer.load(name)
         return HFTokenizer.load(name)
 
+
 class HFTokenizer(Tokenizer):
     def __init__(self, *args, bos_str: str | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.bos_str = bos_str
 
     def info(self):
-        return {"data": {"tokenizer": {
-            "name": "huggingface",
-            "path": self.name
-        }}}
+        return {"data": {"tokenizer": {"name": "huggingface", "path": self.name}}}
 
     def get_vocab_size(self):
         if "byt5" in self.name:
             return self.tokenizer.vocab_size
         return self.tokenizer.get_vocab_size()
-    
+
     def get_token(self, i):
         if "byt5" in self.name:
             token = self.tokenizer.convert_ids_to_tokens(i)
@@ -228,7 +230,7 @@ class HFTokenizer(Tokenizer):
             try:
                 return as_bytes.decode("utf-8")
             except UnicodeDecodeError:
-                return as_int # as_bytes
+                return as_int  # as_bytes
         t = self.tokenizer.id_to_token(i)
         if t == self.bos_str:
             return ALIGNED_BOS
@@ -237,22 +239,29 @@ class HFTokenizer(Tokenizer):
             if not t.startswith("##"):
                 return f" {t}"
             return re.sub(r"##([^#])", r"\1", t)
-        if isinstance(self.tokenizer.model, tokenizers.models.Unigram) or any(n in self.name for n in ("gemma", "Phi-3", "Mistral-7B-Instruct-v0.3")):
+        if isinstance(self.tokenizer.model, tokenizers.models.Unigram) or any(
+            n in self.name for n in ("gemma", "Phi-3", "Mistral-7B-Instruct-v0.3")
+        ):
             # Replace whitespace handling with actual whitespace.
             return t.replace("▁", " ")
         # BPE models.
         return real_unicode(t)
 
-    def get_vocab(self): #TODO
+    def get_vocab(self):  # TODO
         # Track multiple values because tekken and tokenmonster are weird
         vocab = collections.defaultdict(list)
         for i in range(self.get_vocab_size()):
             vocab[to_bytes(self.get_token(i))].append(i)
         if len(vocab) != self.get_vocab_size():
-            logging.error("Built vocab size (%d) does not match declared vocab size (%d) for %s", len(vocab), self.get_vocab_size(), self.info()["data"]["tokenizer"]["name"])
+            logging.error(
+                "Built vocab size (%d) does not match declared vocab size (%d) for %s",
+                len(vocab),
+                self.get_vocab_size(),
+                self.info()["data"]["tokenizer"]["name"],
+            )
         return vocab
 
-    def tokenize(self, input_text): #TODO
+    def tokenize(self, input_text):  # TODO
         encoded_output = self.tokenizer.encode(input_text)
         if hasattr(encoded_output, "tokens"):  # Case: tokenizers.Tokenizer object
             return encoded_output.tokens
@@ -278,14 +287,13 @@ class HFTokenizer(Tokenizer):
             tok = tok._tokenizer
         return cls(name, tok, bos_str=bos_str)
 
+
 # Note, GPT4 and GPT4o don't have BOS
 class TikTokenTokenizer(Tokenizer):
-
     def info(self):
-        return {"data": {"tokenizer": {
-            "name": "tiktoken",
-            "path": self.name.split("/")[1]
-        }}}
+        return {
+            "data": {"tokenizer": {"name": "tiktoken", "path": self.name.split("/")[1]}}
+        }
 
     def get_token(self, i):
         try:
@@ -296,60 +304,71 @@ class TikTokenTokenizer(Tokenizer):
 
     def get_vocab_size(self):
         return self.tokenizer.n_vocab
-    
-    def get_vocab(self): #TODO
+
+    def get_vocab(self):  # TODO
         # Track multiple values because tekken and tokenmonster are weird
         vocab = collections.defaultdict(list)
         for i in range(self.get_vocab_size()):
             vocab[to_bytes(self.get_token(i))].append(i)
         if len(vocab) != self.get_vocab_size():
-            logging.error("Built vocab size (%d) does not match declared vocab size (%d) for %s", len(vocab), self.get_vocab_size(), self.info()["data"]["tokenizer"]["name"])
+            logging.error(
+                "Built vocab size (%d) does not match declared vocab size (%d) for %s",
+                len(vocab),
+                self.get_vocab_size(),
+                self.info()["data"]["tokenizer"]["name"],
+            )
         return vocab
 
-    def tokenize(self, input_text): #TODO
+    def tokenize(self, input_text):  # TODO
         return self.tokenizer.encode(input_text)
-    
+
     @classmethod
     def load(cls, name):
         import tiktoken
+
         tok = tiktoken.encoding_for_model(name.split("/")[1])
         return cls(name, tok)
 
-class TokenMonsterTokenizer(Tokenizer):
 
+class TokenMonsterTokenizer(Tokenizer):
     def info(self):
-        return {"data": {"tokenizer": {
-            "name": "tokenmonster",
-            "path": self.name.split("/")[1]
-        }}}
+        return {
+            "data": {
+                "tokenizer": {"name": "tokenmonster", "path": self.name.split("/")[1]}
+            }
+        }
 
     def get_token(self, i):
         return self.tokenizer.id_to_token(i)
 
     def get_vocab_size(self):
         return self.tokenizer.vocab_size
-    
-    def get_vocab(self): #TODO
+
+    def get_vocab(self):  # TODO
         """Version that excludes ALL duplicate tokens, not just replacement chars"""
         vocab = collections.defaultdict(list)
-        
+
         # Build full vocabulary first
         for i in range(self.get_vocab_size()):
             vocab[to_bytes(self.get_token(i))].append(i)
-        
+
         # Find duplicates
-        duplicates = {byte_seq: token_ids for byte_seq, token_ids in vocab.items() if len(token_ids) > 1}
-        
+        duplicates = {
+            byte_seq: token_ids
+            for byte_seq, token_ids in vocab.items()
+            if len(token_ids) > 1
+        }
+
         if duplicates:
             print(f"Found {len(duplicates)} duplicate byte sequences")
             for byte_seq, token_ids in duplicates.items():
-                char_repr = byte_seq.decode('utf-8', errors='replace')
+                char_repr = byte_seq.decode("utf-8", errors="replace")
                 print(f"  '{char_repr}': {len(token_ids)} duplicates")
-        
+
         # Build clean vocab keeping only first occurrence of each duplicate
         clean_vocab = {}
         total_excluded = 0
-        
+
         for byte_seq, token_ids in vocab.items():
             if len(token_ids) > 1:
                 # Keep only the first token ID for duplicates
@@ -358,26 +377,26 @@ class TokenMonsterTokenizer(Tokenizer):
             else:
                 # Keep single tokens as-is
                 clean_vocab[byte_seq] = token_ids
-        
-        print(f"Strict filtering: {len(clean_vocab)} unique tokens ({total_excluded} duplicates excluded) for {self.info()}")
+
+        print(
+            f"Strict filtering: {len(clean_vocab)} unique tokens ({total_excluded} duplicates excluded) for {self.info()}"
+        )
         return clean_vocab
 
-    def tokenize(self, input_text): #TODO
+    def tokenize(self, input_text):  # TODO
         return [int(t) for t in self.tokenizer.tokenize(input_text)]
 
     @classmethod
     def load(cls, name):
         import tokenmonster
+
         tok = tokenmonster.load(name.split("/")[1])
         return cls(name, tok)
 
-class MistralTokenizer(Tokenizer):
 
+class MistralTokenizer(Tokenizer):
     def info(self):
-        return {"data": {"tokenizer": {
-            "name": "tekken",
-            "path": "tekken"
-        }}}
+        return {"data": {"tokenizer": {"name": "tekken", "path": "tekken"}}}
 
     def get_token(self, i):
         if i == self.tokenizer.bos_id:
@@ -386,28 +405,32 @@ class MistralTokenizer(Tokenizer):
 
     def get_vocab_size(self):
         return self.tokenizer.n_words
-    
-    def get_vocab(self): #TODO
+
+    def get_vocab(self):  # TODO
         """Version that excludes ALL duplicate tokens, not just replacement chars"""
         vocab = collections.defaultdict(list)
-        
+
         # Build full vocabulary first
         for i in range(self.get_vocab_size()):
             vocab[to_bytes(self.get_token(i))].append(i)
-        
+
         # Find duplicates
-        duplicates = {byte_seq: token_ids for byte_seq, token_ids in vocab.items() if len(token_ids) > 1}
-        
+        duplicates = {
+            byte_seq: token_ids
+            for byte_seq, token_ids in vocab.items()
+            if len(token_ids) > 1
+        }
+
         if duplicates:
             print(f"Found {len(duplicates)} duplicate byte sequences")
             for byte_seq, token_ids in duplicates.items():
-                char_repr = byte_seq.decode('utf-8', errors='replace')
+                char_repr = byte_seq.decode("utf-8", errors="replace")
                 print(f"  '{char_repr}': {len(token_ids)} duplicates")
-        
+
         # Build clean vocab keeping only first occurrence of each duplicate
         clean_vocab = {}
         total_excluded = 0
-        
+
         for byte_seq, token_ids in vocab.items():
             if len(token_ids) > 1:
                 # Keep only the first token ID for duplicates
@@ -416,17 +439,19 @@ class MistralTokenizer(Tokenizer):
             else:
                 # Keep single tokens as-is
                 clean_vocab[byte_seq] = token_ids
-        
-        print(f"Strict filtering: {len(clean_vocab)} unique tokens ({total_excluded} duplicates excluded) for {self.info()}")
+
+        print(
+            f"Strict filtering: {len(clean_vocab)} unique tokens ({total_excluded} duplicates excluded) for {self.info()}"
+        )
         return clean_vocab
 
-    def tokenize(self, input_text): #TODO
+    def tokenize(self, input_text):  # TODO
         return self.tokenizer.encode(input_text, False, False)
 
     @classmethod
     def load(cls, name):
         from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+
         tok = MistralTokenizer.v3(is_tekken=True)
         tok = tok.instruct_tokenizer.tokenizer
         return cls(name, tok)
-
