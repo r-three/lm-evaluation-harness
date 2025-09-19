@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_completion_farsi_word_spacing_zero-width_characters_extra_space
+include: tokenizer_robustness_completion_farsi_base.yaml
+task: tokenizer_robustness_completion_farsi_word_spacing_zero-width_characters_extra_space

@@ -1,0 +1,24 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_completion_farsi
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tokenizer_robustness_completion_farsi_colloquial
+- tokenizer_robustness_completion_farsi_optional_diacritics
+- tokenizer_robustness_completion_farsi_romanization
+- tokenizer_robustness_completion_farsi_spelled_out
+- tokenizer_robustness_completion_farsi_code_language_script_switching
+- tokenizer_robustness_completion_farsi_word_spacing_zero-width_characters_extra_space
+- tokenizer_robustness_completion_farsi_arabic_keyboard_for_farsi
+- tokenizer_robustness_completion_farsi_keyboard_proximity_errors
+- tokenizer_robustness_completion_farsi_canonical
+- tokenizer_robustness_completion_farsi_dialects
+- tokenizer_robustness_completion_farsi_number_romanization
+- tokenizer_robustness_completion_farsi_equivalent_expressions
