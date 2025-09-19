@@ -1,0 +1,3 @@
+dataset_name: tokenization_robustness_completion_farsi_currency_symbol
+include: tokenization_robustness_completion_farsi_base.yaml
+task: tokenization_robustness_completion_farsi_currency_symbol
