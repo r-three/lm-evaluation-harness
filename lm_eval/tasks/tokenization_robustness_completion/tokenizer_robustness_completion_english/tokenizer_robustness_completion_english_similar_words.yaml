@@ -1,3 +1,0 @@
-dataset_name: tokenizer_robustness_completion_english_similar_words
-include: tokenizer_robustness_completion_english_base.yaml
-task: tokenizer_robustness_completion_english_similar_words

@@ -1,3 +1,0 @@
-dataset_name: farsi_tokenizer_robustness_completion_keyboard_proximity_errors
-include: farsi_tokenizer_robustness_completion_base.yaml
-task: farsi_tokenizer_robustness_completion_keyboard_proximity_errors

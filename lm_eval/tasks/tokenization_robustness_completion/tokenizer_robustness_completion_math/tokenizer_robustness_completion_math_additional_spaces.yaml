@@ -1,3 +1,0 @@
-dataset_name: additional_spaces
-include: tokenizer_robustness_completion_math_base.yaml
-task: tokenizer_robustness_completion_math_additional_spaces

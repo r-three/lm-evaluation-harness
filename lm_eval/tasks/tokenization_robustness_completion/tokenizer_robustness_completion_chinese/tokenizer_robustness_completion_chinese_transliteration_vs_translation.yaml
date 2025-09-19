@@ -1,3 +1,0 @@
-dataset_name: tokenizer_robustness_completion_chinese_transliteration_vs_translation
-include: tokenizer_robustness_completion_chinese_base.yaml
-task: tokenizer_robustness_completion_chinese_transliteration_vs_translation
