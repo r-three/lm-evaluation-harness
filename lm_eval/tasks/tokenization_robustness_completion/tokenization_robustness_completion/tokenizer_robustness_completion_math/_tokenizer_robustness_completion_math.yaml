@@ -12,7 +12,7 @@ metadata:
 task:
 - tokenizer_robustness_completion_math_latex
 - tokenizer_robustness_completion_math_spelled_out
-- tokenizer_robustness_completion_math_cannonical
+- tokenizer_robustness_completion_math_canonical
 - tokenizer_robustness_completion_math_turkish
 - tokenizer_robustness_completion_math_farsi
 - tokenizer_robustness_completion_math_space_removal
