@@ -108,7 +108,7 @@ def get_train_overlap(docs_by_task_set: dict, ngrams_path: str, limit: int) -> d
         elapsed = time.perf_counter() - start
         print(f"Merging lookups took {elapsed:0.5f} seconds.")
 
-        print(f"{ngrams_n_size} grams files found in {ngrams_path}:")
+        print(f"{ngrams_n_size} grams files found in {ngrams_path}:") 
         files = glob.glob(os.path.join(ngrams_path, "*.sorted.zst"))
         print(files)
 

@@ -1576,6 +1576,7 @@ class ConfigurableTask(Task):
             # retrieve choices in List[str] form, to compute choice lengths, etc.
             choices = self.doc_to_choice(doc)
             completion_len = np.array([float(len(i)) for i in choices])
+            token_len = np.array([float(len(i.split())) for i in choices])
 
             if (
                 2 * len(choices) == len(lls)
@@ -1592,7 +1593,7 @@ class ConfigurableTask(Task):
 
             pred = np.argmax(lls)
             pred_norm = np.argmax(lls / completion_len)
-
+            pred_norm_token_length = np.argmax(lls / token_len)
             if self.multiple_input:
                 gold = self.doc_to_text(doc)
             else:
@@ -1625,6 +1626,7 @@ class ConfigurableTask(Task):
             else:
                 acc = 1.0 if pred == gold else 0.0
                 acc_norm = 1.0 if pred_norm == gold else 0.0
+                acc_norm_token_length = 1.0 if pred_norm_token_length == gold else 0.0
                 # TODO: this gets score of 0 on arc_challenge for pythia-70m. need to test that this works properly
                 exact_match = int(is_greedy[gold]) if gold != -100 else 0
 
@@ -1637,6 +1639,11 @@ class ConfigurableTask(Task):
                 **({"f1": (gold, pred)} if "f1" in use_metric else {}),
                 **({"mcc": (gold, pred)} if "mcc" in use_metric else {}),
                 **({"acc_norm": acc_norm} if "acc_norm" in use_metric else {}),
+                **(
+                    {"acc_norm_token_length": acc_norm}
+                    if "acc_norm_token_length" in use_metric
+                    else {}
+                ),
                 **({"exact_match": exact_match} if "exact_match" in use_metric else {}),
                 **(
                     {"brier_score": (gold, prob_norm)}

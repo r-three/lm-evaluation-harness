@@ -1,0 +1,3 @@
+dataset_name: it
+include: wiki40b_default_yaml
+task: wiki40b_it

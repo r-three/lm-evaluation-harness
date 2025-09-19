@@ -1,0 +1,6 @@
+dataset_name: zh-cn
+include: wiki40b_default_yaml
+task: wiki40b_zh
+metric_list:
+  - metric: byte_perplexity
+  - metric: bits_per_byte
