@@ -1,3 +1,0 @@
-dataset_name: tokenization_robustness_completion_farsi_spelled_out
-include: tokenization_robustness_completion_farsi_base.yaml
-task: tokenization_robustness_completion_farsi_spelled_out
