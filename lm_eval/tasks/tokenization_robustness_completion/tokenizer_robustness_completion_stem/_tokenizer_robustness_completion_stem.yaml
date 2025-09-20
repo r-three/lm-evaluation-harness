@@ -1,0 +1,32 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_completion_stem
+metadata:
+  description: Tokenization robustness evaluation dataset
+  version: 1.0.2
+task:
+- tokenizer_robustness_completion_stem_unusual_formatting
+- tokenizer_robustness_completion_stem_unicode_formatting
+- tokenizer_robustness_completion_stem_latex
+- tokenizer_robustness_completion_stem_superscript_subscript
+- tokenizer_robustness_completion_stem_character_deletion
+- tokenizer_robustness_completion_stem_colloquial
+- tokenizer_robustness_completion_stem_equivalent_expressions
+- tokenizer_robustness_completion_stem_diacriticized_styling
+- tokenizer_robustness_completion_stem_enclosed_characters
+- tokenizer_robustness_completion_stem_upside_down_rotated
+- tokenizer_robustness_completion_stem_canonical
+- tokenizer_robustness_completion_stem_scripted_text
+- tokenizer_robustness_completion_stem_strikethrough
+- tokenizer_robustness_completion_stem_morpheme_separation
+- tokenizer_robustness_completion_stem_spelled_out
+- tokenizer_robustness_completion_stem_space_removal
+- tokenizer_robustness_completion_stem_compounds
+- tokenizer_robustness_completion_stem_fullwidth_characters
+- tokenizer_robustness_completion_stem_typographical_errors
+- tokenizer_robustness_completion_stem_double_struck
