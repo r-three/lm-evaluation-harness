@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_auto_turkish_internal_space
+include: tokenizer_robustness_auto_turkish_base.yaml
+task: tokenizer_robustness_auto_turkish_internal_space

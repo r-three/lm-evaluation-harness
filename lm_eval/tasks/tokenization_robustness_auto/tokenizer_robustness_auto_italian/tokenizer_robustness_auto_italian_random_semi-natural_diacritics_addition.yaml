@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_auto_italian_random_semi-natural_diacritics_addition
+include: tokenizer_robustness_auto_italian_base.yaml
+task: tokenizer_robustness_auto_italian_random_semi-natural_diacritics_addition

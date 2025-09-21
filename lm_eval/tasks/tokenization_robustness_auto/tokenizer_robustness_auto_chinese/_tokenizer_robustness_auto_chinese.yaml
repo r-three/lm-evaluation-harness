@@ -1,0 +1,21 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_auto_chinese
+metadata:
+  description: Tokenization robustness evaluation dataset (exhaustive)
+  version: 1.0.2
+task:
+- tokenizer_robustness_auto_chinese_character_deletion
+- tokenizer_robustness_auto_chinese_unintentional_character_substitution
+- tokenizer_robustness_auto_chinese_random_repetition
+- tokenizer_robustness_auto_chinese_swap_quote
+- tokenizer_robustness_auto_chinese_internal_space
+- tokenizer_robustness_auto_chinese_character_injection
+- tokenizer_robustness_auto_chinese_canonical
+- tokenizer_robustness_auto_chinese_internal_zerowidth
+- tokenizer_robustness_auto_chinese_permutation

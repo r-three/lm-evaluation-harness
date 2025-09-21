@@ -1,0 +1,29 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_auto_italian
+metadata:
+  description: Tokenization robustness evaluation dataset (exhaustive)
+  version: 1.0.2
+task:
+- tokenizer_robustness_auto_italian_internal_space
+- tokenizer_robustness_auto_italian_swap_quote
+- tokenizer_robustness_auto_italian_internal_zerowidth
+- tokenizer_robustness_auto_italian_character_injection
+- tokenizer_robustness_auto_italian_random_repetition
+- tokenizer_robustness_auto_italian_character_deletion
+- tokenizer_robustness_auto_italian_capitalization
+- tokenizer_robustness_auto_italian_random_diacritics_addition
+- tokenizer_robustness_auto_italian_random_semi-natural_diacritics_addition
+- tokenizer_robustness_auto_italian_canonical
+- tokenizer_robustness_auto_italian_homoglyphs
+- tokenizer_robustness_auto_italian_unintentional_character_substitution
+- tokenizer_robustness_auto_italian_ocr_errors
+- tokenizer_robustness_auto_italian_permutation
+- tokenizer_robustness_auto_italian_keyboard_proximity_errors
+- tokenizer_robustness_auto_italian_diacritics_removal
+- tokenizer_robustness_auto_italian_swap_quote_pair

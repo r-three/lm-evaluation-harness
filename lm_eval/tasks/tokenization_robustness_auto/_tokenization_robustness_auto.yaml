@@ -1,0 +1,13 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenization_robustness_auto
+metadata:
+  description: Tokenization robustness evaluation dataset (exhaustive)
+  version: 1.0.2
+task:
+- tokenizer_robustness_auto_farsi

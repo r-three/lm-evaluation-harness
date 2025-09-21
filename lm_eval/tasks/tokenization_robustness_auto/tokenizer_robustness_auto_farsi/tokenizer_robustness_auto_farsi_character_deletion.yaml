@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_auto_farsi_character_deletion
+include: tokenizer_robustness_auto_farsi_base.yaml
+task: tokenizer_robustness_auto_farsi_character_deletion

@@ -1,0 +1,3 @@
+dataset_name: tokenizer_robustness_auto_english_random_repetition
+include: tokenizer_robustness_auto_english_base.yaml
+task: tokenizer_robustness_auto_english_random_repetition

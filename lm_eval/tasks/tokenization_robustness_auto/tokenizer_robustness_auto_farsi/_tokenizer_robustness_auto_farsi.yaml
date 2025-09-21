@@ -1,0 +1,26 @@
+aggregate_metric_list:
+- aggregation: mean
+  metric: acc
+  weight_by_size: true
+- aggregation: mean
+  metric: acc_norm
+  weight_by_size: true
+group: tokenizer_robustness_auto_farsi
+metadata:
+  description: Tokenization robustness evaluation dataset (exhaustive)
+  version: 1.0.2
+task:
+- tokenizer_robustness_auto_farsi_internal_space
+- tokenizer_robustness_auto_farsi_permutation
+- tokenizer_robustness_auto_farsi_random_repetition
+- tokenizer_robustness_auto_farsi_homoglyphs
+- tokenizer_robustness_auto_farsi_random_semi-natural_diacritics_addition
+- tokenizer_robustness_auto_farsi_keyboard_proximity_errors
+- tokenizer_robustness_auto_farsi_internal_zerowidth
+- tokenizer_robustness_auto_farsi_swap_quote
+- tokenizer_robustness_auto_farsi_unintentional_character_substitution
+- tokenizer_robustness_auto_farsi_ocr_errors
+- tokenizer_robustness_auto_farsi_swap_quote_pair
+- tokenizer_robustness_auto_farsi_character_deletion
+- tokenizer_robustness_auto_farsi_canonical
+- tokenizer_robustness_auto_farsi_character_injection
