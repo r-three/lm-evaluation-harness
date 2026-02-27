@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import copy
 import logging
 import os
 from collections.abc import Iterator, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
 from typing import TYPE_CHECKING, Any, Literal
 
 import jinja2
@@ -23,7 +20,6 @@ from accelerate import (
 from accelerate.utils import get_max_memory
 from huggingface_hub import HfApi
 from packaging import version
-from packaging.version import parse as vparse
 from packaging.version import parse as vparse
 from tqdm import tqdm
 from transformers.models.auto.modeling_auto import (
@@ -46,7 +42,6 @@ from lm_eval.models.utils_hf import (
     clear_torch_cache,
     get_dtype,
     pad_and_concat,
-    postprocess_generated_text,
     stop_sequences_criteria,
 )
 
@@ -54,7 +49,7 @@ from lm_eval.models.utils_hf import (
 # Import your custom tokenizer classes - adjust the import path as needed
 try:
     from lm_eval.models.tokenizers_module import (
-        MistralTokenizer,
+    MistralTokenizer,
         TikTokenTokenizer,
         Tokenizer,
         TokenMonsterTokenizer,
@@ -92,16 +87,8 @@ class HFLM(TemplateLM):
     def __init__(
         self,
         pretrained: str | transformers.PreTrainedModel,
-        pretrained: str | transformers.PreTrainedModel,
         backend: Literal["default", "causal", "seq2seq"] = "default",
         # override whether the model should be treated as decoder-only (causal) or encoder-decoder (seq2seq)
-        revision: str | None = "main",
-        subfolder: str = "",
-        tokenizer: str
-        | transformers.PreTrainedTokenizer
-        | transformers.PreTrainedTokenizerFast
-        | None = None,
-        truncation: bool | None = False,
         revision: str | None = "main",
         subfolder: str = "",
         tokenizer: str
@@ -127,21 +114,7 @@ class HFLM(TemplateLM):
         max_memory_per_gpu: int | str | None = None,
         max_cpu_memory: int | str | None = None,
         offload_folder: str | os.PathLike | None = "./offload",
-        parallelize: bool | None = False,
-        max_memory_per_gpu: int | str | None = None,
-        max_cpu_memory: int | str | None = None,
-        offload_folder: str | os.PathLike | None = "./offload",
         # PEFT, delta weights and quantization options
-        peft: str | None = None,
-        delta: str | None = None,
-        autogptq: bool | str | None = False,
-        gptqmodel: bool | None = False,
-        gguf_file: str | None = None,
-        # end token for thinking, either the string or int token id.
-        # splits to get response after this token (if provided).
-        think_end_token: str | int | None = None,
-        enable_thinking: bool | None = None,
-        chat_template_args: dict[str, Any] | None = None,
         peft: str | None = None,
         delta: str | None = None,
         autogptq: bool | str | None = False,
@@ -237,7 +210,6 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 gguf_file=gguf_file,
                 subfolder=subfolder,
-                subfolder=subfolder,
             )
 
             # determine which of 'causal' and 'seq2seq' backends to use for HF models
@@ -250,7 +222,6 @@ class HFLM(TemplateLM):
             pretrained,
             tokenizer,
             revision=revision,
-            subfolder=subfolder,
             subfolder=subfolder,
             trust_remote_code=trust_remote_code,
             use_fast_tokenizer=use_fast_tokenizer,
@@ -289,8 +260,6 @@ class HFLM(TemplateLM):
                 autogptq=autogptq,
                 gptqmodel=gptqmodel,
                 gguf_file=gguf_file,
-                quantization_config=quantization_config,
-                subfolder=subfolder,
                 quantization_config=quantization_config,
                 subfolder=subfolder,
                 **kwargs,
