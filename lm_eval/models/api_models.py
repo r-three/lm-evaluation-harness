@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import time
 import copy
 import itertools
 import json
@@ -480,6 +481,7 @@ class TemplateAPI(TemplateLM):
                     f"API request failed with error message: {response.text}. Retrying..."
                 )
             response.raise_for_status()
+            time.sleep(1)  # to avoid rate limiting
             return response.json()
         except RetryError:
             eval_logger.error(
