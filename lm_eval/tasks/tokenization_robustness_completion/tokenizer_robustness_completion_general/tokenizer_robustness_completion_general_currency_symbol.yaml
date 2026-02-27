@@ -1,3 +1,3 @@
-dataset_name: tokenizer_robustness_completion_general_currency_symbol
+dataset_name: toksuite_general_currency_symbol
 include: tokenizer_robustness_completion_general_base.yaml
 task: tokenizer_robustness_completion_general_currency_symbol

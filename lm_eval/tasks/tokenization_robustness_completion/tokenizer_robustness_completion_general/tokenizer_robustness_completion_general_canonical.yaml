@@ -1,3 +1,3 @@
-dataset_name: tokenizer_robustness_completion_general_canonical
+dataset_name: toksuite_general_canonical
 include: tokenizer_robustness_completion_general_base.yaml
 task: tokenizer_robustness_completion_general_canonical

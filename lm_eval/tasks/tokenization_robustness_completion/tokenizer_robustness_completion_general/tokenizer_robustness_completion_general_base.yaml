@@ -1,5 +1,5 @@
 dataset_kwargs: null
-dataset_name: tokenizer_robustness_completion_general
+dataset_name: toksuite_general
 dataset_path: toksuite/toksuite_general
 doc_to_choice: choices
 doc_to_target: answer

@@ -1,3 +1,3 @@
-dataset_name: tokenizer_robustness_completion_turkish_web_search_query
+dataset_name: toksuite_turkish_web_search_query
 include: tokenizer_robustness_completion_turkish_base.yaml
 task: tokenizer_robustness_completion_turkish_web_search_query

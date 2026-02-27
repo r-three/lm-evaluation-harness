@@ -1,3 +1,3 @@
-dataset_name: tokenizer_robustness_completion_italian_english_keyboard
+dataset_name: toksuite_italian_english_keyboard
 include: tokenizer_robustness_completion_italian_base.yaml
 task: tokenizer_robustness_completion_italian_english_keyboard

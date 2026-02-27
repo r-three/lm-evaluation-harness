@@ -1,3 +1,3 @@
-dataset_name: tokenizer_robustness_completion_farsi_arabic_keyboard_for_farsi
+dataset_name: toksuite_farsi_arabic_keyboard_for_farsi
 include: tokenizer_robustness_completion_farsi_base.yaml
 task: tokenizer_robustness_completion_farsi_arabic_keyboard_for_farsi
