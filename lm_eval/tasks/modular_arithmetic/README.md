@@ -9,8 +9,8 @@ Each example presents the problem as a completion task: given `"{a} mod {b} ="`,
 generate the correct integer remainder.
 
 - `a` is drawn uniformly from [0, 9999]
-- Moduli: 2, 3, 4, 5, 8, 10, 16, 25, 32, 100, 125, 1000
-- Splits: 108,000 train / 12,000 test (90/10 split, seed 42)
+- Moduli: 2, 3, 4, 5, 7, 8, 10, 16, 25, 32, 100, 125, 1000
+- Splits: 1,170,000 train / 130,000 test (90/10 split, seed 42)
 
 ### Tokenizer Hypothesis
 
@@ -20,21 +20,6 @@ digits right-to-left in chunks of that size exposes the relevant information as 
 
 For all other moduli (e.g. 3, 7, 11, …) the digit structure is more complex and is labelled
 `complex`.
-
-| modulus (b) | suitable_tokenizer | problem_type    |
-|------------:|:------------------:|:----------------|
-|           2 | digit_1_rtl        | mod_power_of_2  |
-|           3 | complex            | mod_prime       |
-|           4 | digit_2_rtl        | mod_power_of_2  |
-|           5 | digit_1_rtl        | mod_power_of_5  |
-|           8 | digit_3_rtl        | mod_power_of_2  |
-|          10 | digit_1_rtl        | mod_power_of_10 |
-|          16 | digit_4_rtl        | mod_power_of_2  |
-|          25 | digit_2_rtl        | mod_power_of_5  |
-|          32 | digit_5_rtl        | mod_power_of_2  |
-|         100 | digit_2_rtl        | mod_power_of_10 |
-|         125 | digit_3_rtl        | mod_power_of_5  |
-|        1000 | digit_3_rtl        | mod_power_of_10 |
 
 ### Dataset Fields
 
@@ -69,6 +54,7 @@ for a particular modulus subset:
 * `modular_arithmetic_mod3`
 * `modular_arithmetic_mod4`
 * `modular_arithmetic_mod5`
+* `modular_arithmetic_mod7`
 * `modular_arithmetic_mod8`
 * `modular_arithmetic_mod10`
 * `modular_arithmetic_mod16`
@@ -84,7 +70,7 @@ for a particular modulus subset:
 python -m flexitok.simplified.create_numeric_synthetic_data \
     hf.hf_repo_id=flexitok/mod-arithmetic hf.publish_to_hf=true \
     a_min=0 a_max=9999 \
-    moduli="[2, 3, 4, 5, 8, 10, 16, 25, 32, 100, 125, 1000]" \
+    moduli="[2, 3, 4, 5, 7, 8, 10, 16, 25, 32, 100, 125, 1000]" \
     seed=42 train_ratio=0.9
 ```
 
