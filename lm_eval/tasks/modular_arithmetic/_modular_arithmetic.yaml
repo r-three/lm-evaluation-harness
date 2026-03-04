@@ -1,0 +1,20 @@
+aggregate_metric_list:
+- metric: acc
+  weight_by_size: true
+group: modular_arithmetic
+metadata:
+  version: 1
+task:
+- mod_2
+- mod_3
+- mod_4
+- mod_5
+- mod_7
+- mod_8
+- mod_10
+- mod_16
+- mod_25
+- mod_32
+- mod_100
+- mod_125
+- mod_1000

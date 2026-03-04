@@ -1,0 +1,3 @@
+dataset_name: mod_8
+include: base.yaml
+task: mod_8

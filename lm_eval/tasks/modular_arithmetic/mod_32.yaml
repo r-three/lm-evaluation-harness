@@ -1,0 +1,3 @@
+dataset_name: mod_32
+include: base.yaml
+task: mod_32
