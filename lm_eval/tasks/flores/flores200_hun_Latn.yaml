@@ -1,0 +1,23 @@
+task: flores200_hun_Latn
+dataset_path: flexitok/flores-21langs
+dataset_name: hun_Latn
+test_split: devtest
+validation_split: dev
+# doc_to_text: "{{sentence}}"
+# doc_to_target: ""
+doc_to_text: ""
+doc_to_target: "{{sentence}}"
+description: "FLORES-200 hun_Latn — rolling log-likelihood for BPB / perplexity."
+output_type: loglikelihood_rolling
+# metric_list:
+#   - metric: word_perplexity
+#     aggregation: perplexity
+#     higher_is_better: false
+#   - metric: byte_perplexity
+#     aggregation: perplexity
+#     higher_is_better: false
+#   - metric: bits_per_byte
+#     aggregation: weighted_perplexity
+#     higher_is_better: false
+metadata:
+  version: 1.0

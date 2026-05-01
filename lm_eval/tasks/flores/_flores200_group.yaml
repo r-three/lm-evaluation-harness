@@ -1,0 +1,30 @@
+group: flores200
+task:
+  - flores200_arb_Arab
+  - flores200_ces_Latn
+  - flores200_cmn_Hani
+  - flores200_dan_Latn
+  - flores200_deu_Latn
+  - flores200_ell_Grek
+  - flores200_fas_Arab
+  - flores200_fra_Latn
+  - flores200_eng_Latn
+  - flores200_hun_Latn
+  - flores200_ind_Latn
+  - flores200_ita_Latn
+  - flores200_jpn_Jpan
+  - flores200_nld_Latn
+  - flores200_pol_Latn
+  - flores200_por_Latn
+  - flores200_rus_Cyrl
+  - flores200_spa_Latn
+  - flores200_swe_Latn
+  - flores200_tur_Latn
+  - flores200_vie_Latn
+# aggregate_metric_list:
+#   - metric: byte_perplexity
+#     aggregation: mean
+#   - metric: bits_per_byte
+#     aggregation: mean
+metadata:
+  version: 1.0
