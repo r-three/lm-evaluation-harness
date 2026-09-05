@@ -3,7 +3,8 @@ Generates one lm-eval YAML task file per language, plus a group YAML
 that lets you run all of them with a single task name: flores200.
 
 Usage:
-    python generate_tasks.py --repo your-username/flores-21langs
+    python generate_tasks.py
+    python lm_eval/tasks/flores/create_configs.py
 
 Then evaluate:
     lm_eval --model hf \
@@ -40,6 +41,10 @@ LANGS = [
     "swe_Latn",
     "tur_Latn",
     "vie_Latn",
+    "nob_Latn",
+    "fin_Latn",
+    "ben_Beng",
+    "kor_Hang",
 ]
 
 # lm-eval computes bits-per-byte from loglikelihood_rolling as:

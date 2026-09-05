@@ -21,6 +21,10 @@ task:
   - flores200_swe_Latn
   - flores200_tur_Latn
   - flores200_vie_Latn
+  - flores200_nob_Latn
+  - flores200_fin_Latn
+  - flores200_ben_Beng
+  - flores200_kor_Hang
 # aggregate_metric_list:
 #   - metric: byte_perplexity
 #     aggregation: mean
